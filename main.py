@@ -1,6 +1,19 @@
 import streamlit as st
 import pandas as pd
+import streamlit as st
+import pandas as pd
 import matplotlib.pyplot as plt
+
+# japanize_matplotlib の代わり
+import matplotlib
+import matplotlib.font_manager as fm
+import os
+
+# フォントの設定（エラー回避用）
+try:
+    import japanize_matplotlib
+except ImportError:
+    pass
 import japanize_matplotlib
 
 # ==================================================
