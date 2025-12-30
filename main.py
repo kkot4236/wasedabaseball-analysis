@@ -10,7 +10,7 @@ import os
 def check_password():
     """正しいパスワードが入力されたら True を返す"""
     def password_entered():
-        if st.session_state["password"] == "waseda123":  # ←ここでパスワードを設定（自由に変更してください）
+        if st.session_state["password"] == "wbc1901":  # ←ここでパスワードを設定（自由に変更してください）
             st.session_state["password_correct"] = True
             del st.session_state["password"]  # セキュリティのためセッションから削除
         else:
