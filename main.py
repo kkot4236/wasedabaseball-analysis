@@ -5,40 +5,40 @@ import japanize_matplotlib
 import os
 
 # ==================================================
-# 0. パスワード保護機能（修正版）
+# 0. パスワード保護機能（完璧版）
 # ==================================================
 def check_password():
     """正しいパスワードが入力されたら True を返す"""
     if "password_correct" not in st.session_state:
-        st.session_state["password_correct"] = None  # None: 未入力, True: 正解, False: 不正解
+        st.session_state["password_correct"] = None  # None: 未入力
 
+    # すでに認証済みならそのまま True
     if st.session_state["password_correct"] == True:
         return True
 
-    def password_entered():
-        # 設定したいパスワードに書き換えてください
-        if st.session_state["password_input"] == "waseda123":
+    # 入力フォームの表示
+    st.title("🔐 早稲田大学野球部 データ分析ツール")
+    pw_input = st.text_input("パスワードを入力してください", type="password")
+    
+    if st.button("ログイン"):
+        if pw_input == "waseda123":  # ← ここにパスワードを設定
             st.session_state["password_correct"] = True
+            st.rerun()  # 画面を即座に書き換える
         else:
             st.session_state["password_correct"] = False
-
-    # パスワード入力フォーム
-    st.title("🔐 Access Restricted")
-    st.text_input("パスワードを入力してください", type="password", on_change=password_entered, key="password_input")
-    
-    # 間違えた時だけ表示
-    if st.session_state["password_correct"] == False:
-        st.error("😕 パスワードが違います。もう一度入力してください。")
-    
-    st.info("※チーム関係者専用のサイトです。")
+            st.error("😕 パスワードが違います。もう一度入力してください。")
+            
+    st.info("※部外者のアクセスを防ぐため、チーム共通のパスワードが必要です。")
     return False
 
 # パスワードチェック実行
 if check_password():
 
     # ==================================================
-    # 1. 基本設定
+    # 1. 基本設定（認証後に読み込み）
     # ==================================================
+    st.set_page_config(layout="wide", page_title="野球部データ分析ツール")
+
     PITCH_LIST = ['Fastball', 'Slider', 'Cutter', 'Curveball', 'Splitter', 'ChangeUp', 'Sinker', 'TwoSeamFastBall']
     PITCH_CONFIG = {
         'Fastball': {'color': '#FF4B4B', 'marker': 'o'}, 'Slider': {'color': '#1E90FF', 'marker': '<'}, 
@@ -48,14 +48,12 @@ if check_password():
     }
     DEFAULT_CONFIG = {'color': '#808080', 'marker': 'o'}
 
-    st.set_page_config(layout="wide", page_title="野球部データ分析ツール")
-
-    # テーブルの見た目調整用CSS
+    # CSS
     st.markdown("""
         <style>
         div[data-testid="stTable"] table { width: 100% !important; }
-        th { white-space: nowrap !important; text-align: center !important; background-color: #f0f2f6 !important; padding: 10px !important; }
-        td { text-align: center !important; white-space: nowrap !important; padding: 8px !important; }
+        th { white-space: nowrap !important; text-align: center !important; background-color: #f0f2f6 !important; }
+        td { text-align: center !important; white-space: nowrap !important; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -78,8 +76,7 @@ if check_password():
                 temp_df = pd.read_csv(filepath)
                 temp_df['SeasonFile'] = filename
                 all_data.append(temp_df)
-            except:
-                pass
+            except: pass
 
     if all_data:
         full_df = pd.concat(all_data, ignore_index=True)
@@ -89,7 +86,6 @@ if check_password():
         full_df = full_df.dropna(subset=['Date_dt'])
         full_df['Date_str'] = full_df['Date_dt'].dt.strftime('%Y-%m-%d')
 
-        # --- 集計関数 ---
         def get_summary_df(df):
             if df.empty: return pd.DataFrame()
             total = len(df)
@@ -104,27 +100,23 @@ if check_password():
             res = res[['TaggedPitchType', '投球割合(球数)', '平均球速', '最高球速', '回転数', '縦変化量', '横変化量', '縦リリース', '横リリース']]
             return res.rename(columns={'TaggedPitchType':'球種', '平均球速':'平均球速(km/h)', '最高球速':'最高球速(km/h)', '縦変化量':'縦変化量(cm)', '横変化量':'横変化量(cm)'})
 
-        # --- サイドバー設定 ---
-        st.sidebar.title("MENU")
-        analysis_mode = st.sidebar.radio("📊 表示モードを選択", ["総合分析（レポート形式）", "1人集中分析", "2人比較（左右）"])
+        # --- サイドバー表示（認証後のみ出る） ---
+        st.sidebar.title("📊 MENU")
+        mode = st.sidebar.radio("モード選択", ["総合分析", "1人集中分析", "2人比較"])
         st.sidebar.markdown("---")
 
-        # --- 表示モード別の処理 ---
-        if analysis_mode in ["総合分析（レポート形式）", "1人集中分析"]:
-            # 投手選択
-            p1 = st.sidebar.selectbox("分析する投手を選択", sorted(full_df['Pitcher'].unique()), key="p1_select")
+        if mode in ["総合分析", "1人集中分析"]:
+            p1 = st.sidebar.selectbox("分析する投手", sorted(full_df['Pitcher'].unique()))
             p1_all = full_df[full_df['Pitcher'] == p1]
             
-            # 絞り込み条件
-            st.sidebar.subheader("絞り込みオプション")
-            s_files = st.sidebar.multiselect("ファイルで絞り込む", sorted(p1_all['SeasonFile'].unique()))
-            s_dates = st.sidebar.multiselect("日付で絞り込む", sorted(p1_all['Date_str'].unique(), reverse=True))
+            s_files = st.sidebar.multiselect("ファイル絞り込み", sorted(p1_all['SeasonFile'].unique()))
+            s_dates = st.sidebar.multiselect("日付絞り込み", sorted(p1_all['Date_str'].unique(), reverse=True))
             
             p1_df = p1_all.copy()
             if s_files: p1_df = p1_df[p1_df['SeasonFile'].isin(s_files)]
             if s_dates: p1_df = p1_df[p1_df['Date_str'].isin(s_dates)]
 
-            st.header(f"📋 {p1} 投手 分析結果")
+            st.header(f"📋 {p1} 投手：{mode}")
             
             if not p1_df.empty:
                 col1, col2, col3 = st.columns([4, 4, 1.2])
@@ -135,36 +127,30 @@ if check_password():
                         cfg = PITCH_CONFIG.get(pt, DEFAULT_CONFIG)
                         ax1.scatter(d['HorzBreak'], d['InducedVertBreak'], color=cfg['color'], marker=cfg['marker'], alpha=0.6)
                         ax2.scatter(d['HorzRelAngle'], d['VertRelAngle'], label=pt, color=cfg['color'], marker=cfg['marker'], alpha=0.6)
-                
                 for ax, title, lim in zip([ax1, ax2], ["変化量散布図 [cm]", "リリース角度散布図 [度]"], [(-80, 80), (-6, 6)]):
                     ax.set_xlim(lim); ax.set_ylim(lim); ax.set_box_aspect(1); ax.set_title(title); ax.grid(True, alpha=0.2)
                     ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1)
-                
-                with col1: st.pyplot(fig1)
-                with col2: st.pyplot(fig2)
+                with col1: st.pyplot(fig1); 
+                with col2: st.pyplot(fig2);
                 with col3:
                     h, l = ax2.get_legend_handles_labels()
                     if h:
                         fig_l, ax_l = plt.subplots(figsize=(2, 5)); ax_l.legend(h, l, loc='upper left', frameon=False); ax_l.axis('off'); st.pyplot(fig_l)
-                
-                st.subheader("📊 スタッツ集計表")
+                st.subheader("📊 集計データ")
                 display_custom_table(get_summary_df(p1_df))
-            else:
-                st.info("データがありません。条件を変えてみてください。")
 
-        elif analysis_mode == "2人比較（左右）":
+        elif mode == "2人比較":
             st.sidebar.subheader("投手選択")
-            p_a = st.sidebar.selectbox("投手 A (左側)", sorted(full_df['Pitcher'].unique()), key="pa_select")
-            p_b = st.sidebar.selectbox("投手 B (右側)", sorted(full_df['Pitcher'].unique()), key="pb_select")
+            pa = st.sidebar.selectbox("投手 A (左)", sorted(full_df['Pitcher'].unique()), key="pa")
+            pb = st.sidebar.selectbox("投手 B (右)", sorted(full_df['Pitcher'].unique()), key="pb")
             
-            st.header(f"⚖️ 比較: {p_a} vs {p_b}")
+            st.header(f"⚖️ 比較: {pa} vs {pb}")
             c1, c2 = st.columns(2)
             with c1:
-                st.subheader(f"👤 {p_a}")
-                display_custom_table(get_summary_df(full_df[full_df['Pitcher'] == p_a]))
+                st.subheader(f"👤 {pa}")
+                display_custom_table(get_summary_df(full_df[full_df['Pitcher'] == pa]))
             with c2:
-                st.subheader(f"👤 {p_b}")
-                display_custom_table(get_summary_df(full_df[full_df['Pitcher'] == p_b]))
-
+                st.subheader(f"👤 {pb}")
+                display_custom_table(get_summary_df(full_df[full_df['Pitcher'] == pb]))
     else:
-        st.warning("⚠️ dataフォルダにファイルがありません。GitHubを確認してください。")
+        st.warning("dataフォルダにCSVが見つかりません。")
