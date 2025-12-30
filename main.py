@@ -15,7 +15,7 @@ def check_password():
         return True
 
     def password_entered():
-        if st.session_state["password_input"] == "waseda123": # 設定したパスワード
+        if st.session_state["password_input"] == "waseda123": # パスワード
             st.session_state["password_correct"] = True
         else:
             st.session_state["password_correct"] = False
@@ -43,6 +43,21 @@ if check_password():
     }
     DEFAULT_CONFIG = {'color': '#808080', 'marker': 'o'}
 
+    # テーブル用CSS
+    st.markdown("""
+        <style>
+        div[data-testid="stTable"] table { width: 100% !important; }
+        th { white-space: nowrap !important; text-align: center !important; background-color: #f0f2f6 !important; }
+        td { text-align: center !important; white-space: nowrap !important; }
+        </style>
+        """, unsafe_allow_html=True)
+
+    def display_custom_table(df_to_show):
+        if df_to_show.empty: return
+        format_dict = {col: "{:.1f}" for col in df_to_show.columns if col not in ['球種', '投球割合(球数)']}
+        styled_df = df_to_show.style.format(format_dict).hide(axis='index')
+        st.write(styled_df.to_html(), unsafe_allow_html=True)
+
     # ==================================================
     # 2. データ読み込み
     # ==================================================
@@ -66,15 +81,59 @@ if check_password():
         full_df = full_df.dropna(subset=['Date_dt'])
         full_df['Date_str'] = full_df['Date_dt'].dt.strftime('%Y-%m-%d')
 
-        # --- サイドバー：モード選択 ---
+        def get_summary_df(df):
+            if df.empty: return pd.DataFrame()
+            total = len(df)
+            res = df.groupby('TaggedPitchType', observed=True).agg(
+                count=('Pitcher', 'count'), 平均球速=('RelSpeed', 'mean'), 最高球速=('RelSpeed', 'max'),
+                回転数=('SpinRate', 'mean'), 縦変化量=('InducedVertBreak', 'mean'), 横変化量=('HorzBreak', 'mean'),
+                縦リリース=('VertRelAngle', 'mean'), 横リリース=('HorzRelAngle', 'mean')
+            ).reset_index()
+            res['投球割合(球数)'] = res['count'].apply(lambda x: f"{x/total*100:.1f}% ({x})")
+            res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
+            res = res.sort_values('TaggedPitchType').dropna(subset=['TaggedPitchType'])
+            res = res[['TaggedPitchType', '投球割合(球数)', '平均球速', '最高球速', '回転数', '縦変化量', '横変化量', '縦リリース', '横リリース']]
+            return res.rename(columns={'TaggedPitchType':'球種', '平均球速':'平均球速(km/h)', '最高球速':'最高球速(km/h)', '縦変化量':'縦変化量(cm)', '横変化量':'横変化量(cm)'})
+
+        # --- サイドバー：共通メニュー ---
         st.sidebar.title("📊 MENU")
         mode = st.sidebar.radio("モード選択", ["総合レポート", "1人集中分析", "2人比較"])
         st.sidebar.markdown("---")
 
-        if mode == "1人集中分析":
-            p1 = st.sidebar.selectbox("投手を選択", sorted(full_df['Pitcher'].unique()))
+        # ==================================================
+        # 3-1. 総合レポート（全自動表示）
+        # ==================================================
+        if mode == "総合レポート":
+            p1 = st.sidebar.selectbox("投手を選択", sorted(full_df['Pitcher'].unique()), key="p_rep")
+            p1_all = full_df[full_df['Pitcher'] == p1]
+            st.header(f"📋 {p1} 投手：総合レポート")
             
-            st.sidebar.subheader("分析項目の選択")
+            col1, col2, col3 = st.columns([4, 4, 1.2])
+            fig1, ax1 = plt.subplots(figsize=(5, 5)); fig2, ax2 = plt.subplots(figsize=(5, 5))
+            for pt in PITCH_LIST:
+                d = p1_all[p1_all['TaggedPitchType'] == pt]
+                if not d.empty:
+                    cfg = PITCH_CONFIG.get(pt, DEFAULT_CONFIG)
+                    ax1.scatter(d['HorzBreak'], d['InducedVertBreak'], color=cfg['color'], marker=cfg['marker'], alpha=0.6)
+                    ax2.scatter(d['HorzRelAngle'], d['VertRelAngle'], label=pt, color=cfg['color'], marker=cfg['marker'], alpha=0.6)
+            for ax, title, lim in zip([ax1, ax2], ["変化量散布図 [cm]", "リリース角度散布図 [度]"], [(-80, 80), (-6, 6)]):
+                ax.set_xlim(lim); ax.set_ylim(lim); ax.set_box_aspect(1); ax.set_title(title); ax.grid(True, alpha=0.2)
+                ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1)
+            with col1: st.pyplot(fig1)
+            with col2: st.pyplot(fig2)
+            with col3:
+                h, l = ax2.get_legend_handles_labels()
+                if h:
+                    fig_l, ax_l = plt.subplots(figsize=(2, 5)); ax_l.legend(h, l, loc='upper left', frameon=False); ax_l.axis('off'); st.pyplot(fig_l)
+            st.subheader("📊 総合スタッツ")
+            display_custom_table(get_summary_df(p1_all))
+
+        # ==================================================
+        # 3-2. 1人集中分析（チェックボックス選択式）
+        # ==================================================
+        elif mode == "1人集中分析":
+            p1 = st.sidebar.selectbox("投手を選択", sorted(full_df['Pitcher'].unique()), key="p_focus")
+            st.sidebar.subheader("表示項目の選択")
             show_brk = st.sidebar.checkbox("変化量 (Break)", value=True)
             show_ang = st.sidebar.checkbox("リリースアングル (Angle)", value=True)
             show_loc = st.sidebar.checkbox("到達位置 (PlateLoc)", value=True)
@@ -91,89 +150,75 @@ if check_password():
 
             st.header(f"👤 {p1} 投手：集中分析")
 
-            # グラフ表示エリア
-            col1, col2 = st.columns(2)
+            col_a, col_b = st.columns(2)
             
-            # --- 1. 変化量 ---
             if show_brk:
-                with col1:
+                with col_a:
                     fig, ax = plt.subplots(figsize=(5, 5))
                     for pt in PITCH_LIST:
                         d = p1_df[p1_df['TaggedPitchType'] == pt]
                         if not d.empty:
                             cfg = PITCH_CONFIG.get(pt, DEFAULT_CONFIG)
-                            ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=cfg['color'], marker=cfg['marker'], label=pt, alpha=0.6)
+                            ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=cfg['color'], marker=cfg['marker'], alpha=0.6)
                     ax.set_xlim(-80, 80); ax.set_ylim(-80, 80); ax.set_title("変化量散布図 [cm]")
                     ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1); ax.grid(True, alpha=0.3)
                     st.pyplot(fig)
 
-            # --- 2. リリースアングル ---
             if show_ang:
-                with col2:
+                with col_b:
                     fig, ax = plt.subplots(figsize=(5, 5))
                     for pt in PITCH_LIST:
                         d = p1_df[p1_df['TaggedPitchType'] == pt]
                         if not d.empty:
                             cfg = PITCH_CONFIG.get(pt, DEFAULT_CONFIG)
-                            ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=cfg['color'], marker=cfg['marker'], label=pt, alpha=0.6)
+                            ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=cfg['color'], marker=cfg['marker'], alpha=0.6)
                     ax.set_xlim(-6, 6); ax.set_ylim(-6, 6); ax.set_title("リリースアングル [度]")
                     ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1); ax.grid(True, alpha=0.3)
                     st.pyplot(fig)
 
-            # --- 3. 到達位置 ---
             if show_loc:
-                with col1:
+                with col_a:
                     fig, ax = plt.subplots(figsize=(5, 5))
-                    # ストライクゾーンの枠
                     ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, color='black', lw=2))
                     for pt in PITCH_LIST:
                         d = p1_df[p1_df['TaggedPitchType'] == pt]
                         if not d.empty:
                             cfg = PITCH_CONFIG.get(pt, DEFAULT_CONFIG)
-                            ax.scatter(d['PlateLocSide'], d['PlateLocHeight'], color=cfg['color'], marker=cfg['marker'], label=pt, alpha=0.6)
+                            ax.scatter(d['PlateLocSide'], d['PlateLocHeight'], color=cfg['color'], marker=cfg['marker'], alpha=0.6)
                     ax.set_xlim(-100, 100); ax.set_ylim(0, 150); ax.set_title("到達位置 (PlateLoc)")
                     ax.set_aspect('equal'); ax.grid(True, alpha=0.3)
                     st.pyplot(fig)
 
-            # --- 4. リリース位置 ---
             if show_pos:
-                with col2:
+                with col_b:
                     fig, ax = plt.subplots(figsize=(5, 5))
                     for pt in PITCH_LIST:
                         d = p1_df[p1_df['TaggedPitchType'] == pt]
                         if not d.empty:
                             cfg = PITCH_CONFIG.get(pt, DEFAULT_CONFIG)
-                            ax.scatter(d['RelPosSide'], d['RelPosHeight'], color=cfg['color'], marker=cfg['marker'], label=pt, alpha=0.6)
+                            ax.scatter(d['RelPosSide'], d['RelPosHeight'], color=cfg['color'], marker=cfg['marker'], alpha=0.6)
                     ax.set_xlim(-150, 150); ax.set_ylim(0, 250); ax.set_title("リリース位置 (RelPos)")
                     ax.grid(True, alpha=0.3)
                     st.pyplot(fig)
 
-            # 凡例表示
-            st.markdown("---")
             if show_table:
-                st.subheader("📊 指定条件の集計データ")
-                # 集計処理
-                def get_summary(df):
-                    if df.empty: return pd.DataFrame()
-                    total = len(df)
-                    res = df.groupby('TaggedPitchType', observed=True).agg(
-                        count=('Pitcher', 'count'), 平均球速=('RelSpeed', 'mean'), 最高球速=('RelSpeed', 'max'),
-                        回転数=('SpinRate', 'mean'), 縦変化=('InducedVertBreak', 'mean'), 横変化=('HorzBreak', 'mean')
-                    ).reset_index()
-                    res['割合'] = res['count'].apply(lambda x: f"{x/total*100:.1f}%")
-                    return res
-                st.write(get_summary(p1_df))
+                st.markdown("---")
+                st.subheader("📊 分析スタッツ")
+                display_custom_table(get_summary_df(p1_df))
 
-        # --- 他のモード（総合/比較）は前回同様の構成 ---
-        elif mode == "総合レポート":
-            st.info("総合レポート画面（全項目を一覧表示します）")
-            # （ここに全グラフ表示コードが入りますが、長くなるため1人集中分析を優先して構成しました）
-
+        # ==================================================
+        # 3-3. 2人比較
+        # ==================================================
         elif mode == "2人比較":
-            st.info("比較モード")
             pa = st.sidebar.selectbox("投手 A", sorted(full_df['Pitcher'].unique()), key="pa")
             pb = st.sidebar.selectbox("投手 B", sorted(full_df['Pitcher'].unique()), key="pb")
-            # （比較用の表示コード）
-
+            st.header(f"⚖️ 比較: {pa} vs {pb}")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.subheader(f"👤 {pa}")
+                display_custom_table(get_summary_df(full_df[full_df['Pitcher'] == pa]))
+            with c2:
+                st.subheader(f"👤 {pb}")
+                display_custom_table(get_summary_df(full_df[full_df['Pitcher'] == pb]))
     else:
         st.warning("dataフォルダにCSVが見つかりません。")
