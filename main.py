@@ -36,7 +36,6 @@ if check_password():
         'Sinker': {'color': '#FFA500', 'marker': 'v'}, 'TwoSeamFastBall': {'color': '#FF8C00', 'marker': 'o'}, 
     }
 
-    # 表の表示をきれいにする関数
     def display_mini_table(df, cols_rename):
         if df.empty: return
         res = df.groupby('TaggedPitchType', observed=True).agg({k: 'mean' for k in cols_rename.keys()}).reset_index()
@@ -54,7 +53,6 @@ if check_password():
             filepath = os.path.join(DATA_DIR, filename)
             try:
                 temp_df = pd.read_csv(filepath)
-                # 単位変換
                 for col in ['PlateLocSide', 'PlateLocHeight', 'RelPosSide', 'RelPosHeight']:
                     if col in temp_df.columns: temp_df[col] = temp_df[col] * 100
                 temp_df['SeasonFile'] = filename
@@ -67,103 +65,100 @@ if check_password():
         full_df['Date_str'] = pd.to_datetime(full_df['Date'], errors='coerce').dt.strftime('%Y-%m-%d')
 
         st.sidebar.title("📊 MENU")
-        mode = st.sidebar.radio("モード選択", ["1人集中分析", "総合レポート", "2人比較"])
+        mode = st.sidebar.radio("モード選択", ["総合レポート", "1人集中分析", "2人比較"])
+        st.sidebar.markdown("---")
         
-        p1 = st.sidebar.selectbox("投手を選択", sorted(full_df['Pitcher'].unique().astype(str)))
+        p1 = st.sidebar.selectbox("投手Aを選択", sorted(full_df['Pitcher'].unique().astype(str)), key="p1_select")
         p1_df = full_df[full_df['Pitcher'].astype(str) == p1]
 
         st.sidebar.subheader("📅 絞り込み")
         s_files = st.sidebar.multiselect("ファイル選択", sorted(p1_df['SeasonFile'].unique()))
         s_dates = st.sidebar.multiselect("日付選択", sorted(p1_df['Date_str'].dropna().unique(), reverse=True))
         
-        target_df = p1_df.copy()
-        if s_files: target_df = target_df[target_df['SeasonFile'].isin(s_files)]
-        if s_dates: target_df = target_df[target_df['Date_str'].isin(s_dates)]
+        target_df1 = p1_df.copy()
+        if s_files: target_df1 = target_df1[target_df1['SeasonFile'].isin(s_files)]
+        if s_dates: target_df1 = target_df1[target_df1['Date_str'].isin(s_dates)]
 
-        if mode == "1人集中分析":
-            st.sidebar.subheader("👁 表示項目の選択")
-            show_brk = st.sidebar.checkbox("変化量 (Break)", value=False)
-            show_ang = st.sidebar.checkbox("リリースアングル (Angle)", value=False)
-            show_loc = st.sidebar.checkbox("到達位置 (PlateLoc)", value=False)
-            show_pos = st.sidebar.checkbox("リリース位置 (RelPos)", value=False)
+        # --- 共通グラフ関数（正方形固定） ---
+        def get_fig(df, mode_name):
+            fig, ax = plt.subplots(figsize=(5, 5)) # サイズを固定
+            for pt in PITCH_LIST:
+                d = df[df['TaggedPitchType'] == pt]
+                if d.empty: continue
+                cfg = PITCH_CONFIG[pt]
+                if mode_name == "変化量 (Break)":
+                    ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=cfg['color'], label=pt, alpha=0.6)
+                    ax.set_xlim(-80, 80); ax.set_ylim(-80, 80)
+                elif mode_name == "リリースアングル (Angle)":
+                    ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=cfg['color'], label=pt, alpha=0.6)
+                    ax.set_xlim(-6, 6); ax.set_ylim(-6, 6)
+                elif mode_name == "リリース位置 (RelPos)":
+                    ax.scatter(d['RelPosSide'], d['RelPosHeight'], color=cfg['color'], label=pt, alpha=0.6)
+                    ax.set_xlim(-150, 150); ax.set_ylim(0, 300) # 300で正方形を維持
+            ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1)
+            ax.set_box_aspect(1) # グラフ領域を正方形に強制
+            ax.grid(True, alpha=0.3)
+            return fig
 
-            st.header(f"👤 {p1} 投手：集中分析")
+        if mode == "総合レポート":
+            st.header(f"📋 {p1} 投手：総合レポート")
+            c1, c2 = st.columns(2)
+            with c1: st.pyplot(get_fig(target_df1, "変化量 (Break)"))
+            with c2: st.pyplot(get_fig(target_df1, "リリースアングル (Angle)"))
+            st.subheader("📊 総合スタッツ")
+            display_mini_table(target_df1, {'RelSpeed':'平均球速', 'SpinRate':'平均回転数', 'InducedVertBreak':'縦変化(cm)', 'HorzBreak':'横変化(cm)', 'VertRelAngle':'アングル縦', 'HorzRelAngle':'アングル横'})
 
-            # 1. 変化量
-            if show_brk:
-                st.subheader("■ 変化量散布図 [cm]")
-                fig, ax = plt.subplots(figsize=(8, 5))
-                for pt in PITCH_LIST:
-                    d = target_df[target_df['TaggedPitchType'] == pt]
-                    if not d.empty:
-                        ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_CONFIG[pt]['color'], label=pt, alpha=0.6)
-                ax.set_xlim(-80, 80); ax.set_ylim(-80, 80); ax.axvline(0, color='black'); ax.axhline(0, color='black'); ax.grid(True, alpha=0.3); ax.legend(loc='upper left', bbox_to_anchor=(1,1))
-                st.pyplot(fig)
-                display_mini_table(target_df, {'InducedVertBreak': '縦変化(cm)', 'HorzBreak': '横変化(cm)'})
+        elif mode == "1人集中分析":
+            st.sidebar.subheader("👁 分析項目の選択")
+            analysis_item = st.sidebar.radio("項目を選択", ["変化量 (Break)", "リリースアングル (Angle)", "到達位置 (PlateLoc)", "リリース位置 (RelPos)"])
+            st.header(f"👤 {p1} 投手：{analysis_item}")
 
-            # 2. リリースアングル
-            if show_ang:
-                st.subheader("■ リリースアングル [度]")
-                fig, ax = plt.subplots(figsize=(8, 5))
-                for pt in PITCH_LIST:
-                    d = target_df[target_df['TaggedPitchType'] == pt]
-                    if not d.empty:
-                        ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=PITCH_CONFIG[pt]['color'], label=pt, alpha=0.6)
-                ax.set_xlim(-6, 6); ax.set_ylim(-6, 6); ax.axvline(0, color='black'); ax.axhline(0, color='black'); ax.grid(True, alpha=0.3); ax.legend(loc='upper left', bbox_to_anchor=(1,1))
-                st.pyplot(fig)
-                display_mini_table(target_df, {'VertRelAngle': 'リリースアングル(縦)', 'HorzRelAngle': 'リリースアングル(横)'})
-
-            # 3. 到達位置
-            if show_loc:
-                st.subheader("■ 到達位置 [cm]")
+            if analysis_item == "到達位置 (PlateLoc)":
                 c1, c2 = st.columns(2)
                 for side, col, title in [('Right', c1, '対 右打者'), ('Left', c2, '対 左打者')]:
                     with col:
-                        fig, ax = plt.subplots(figsize=(5, 6))
+                        fig, ax = plt.subplots(figsize=(5, 5))
                         ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, lw=2))
-                        d_s = target_df[target_df['BatterSide'] == side]
+                        d_s = target_df1[target_df1['BatterSide'] == side]
                         for pt in PITCH_LIST:
                             d_p = d_s[d_s['TaggedPitchType'] == pt]
                             if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_CONFIG[pt]['color'], alpha=0.6)
-                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(title); ax.set_aspect('equal'); st.pyplot(fig)
-                display_mini_table(target_df, {'PlateLocHeight': '到達高さ(cm)', 'PlateLocSide': '到達横位置(cm)'})
+                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(title); ax.set_box_aspect(1); st.pyplot(fig)
+                display_mini_table(target_df1, {'PlateLocHeight': '到達高さ(cm)', 'PlateLocSide': '到達横(cm)'})
+            else:
+                st.pyplot(get_fig(target_df1, analysis_item))
+                tbl_map = {"変化量 (Break)": {'InducedVertBreak': '縦変化(cm)', 'HorzBreak': '横変化(cm)'}, "リリースアングル (Angle)": {'VertRelAngle': 'アングル縦', 'HorzRelAngle': 'アングル横'}, "リリース位置 (RelPos)": {'RelPosHeight': 'リリース高(cm)', 'RelPosSide': 'リリースサイド(cm)'}}
+                display_mini_table(target_df1, tbl_map[analysis_item])
 
-            # 4. リリース位置 (エラー対策)
-            if show_pos:
-                st.subheader("■ リリース位置 [cm]")
-                if 'RelPosSide' in target_df.columns and 'RelPosHeight' in target_df.columns:
-                    fig, ax = plt.subplots(figsize=(8, 5))
-                    for pt in PITCH_LIST:
-                        d = target_df[target_df['TaggedPitchType'] == pt]
-                        if not d.empty:
-                            ax.scatter(d['RelPosSide'], d['RelPosHeight'], color=PITCH_CONFIG[pt]['color'], label=pt, alpha=0.6)
-                    ax.set_xlim(-150, 150); ax.set_ylim(0, 250); ax.axvline(0, color='black'); ax.grid(True, alpha=0.3); ax.legend(loc='upper left', bbox_to_anchor=(1,1))
-                    st.pyplot(fig)
-                    display_mini_table(target_df, {'RelPosHeight': 'リリース高(cm)', 'RelPosSide': 'リリースサイド(cm)'})
-                else:
-                    st.error("データ内にリリース位置（RelPos）のカラムが見つかりません。")
+        elif mode == "2人比較":
+            st.sidebar.markdown("---")
+            p2 = st.sidebar.selectbox("投手Bを選択", sorted(full_df['Pitcher'].unique().astype(str)), key="p2_select")
+            target_df2 = full_df[full_df['Pitcher'].astype(str) == p2]
+            if s_files: target_df2 = target_df2[target_df2['SeasonFile'].isin(s_files)]
+            if s_dates: target_df2 = target_df2[target_df2['Date_str'].isin(s_dates)]
 
-        elif mode == "総合レポート":
-            st.header(f"📋 {p1} 投手：総合レポート")
-            # 変化量とアングルを並べて表示
-            col1, col2 = st.columns(2)
-            with col1:
-                fig, ax = plt.subplots(figsize=(5, 5))
-                for pt in PITCH_LIST:
-                    d = target_df[target_df['TaggedPitchType'] == pt]
-                    if not d.empty: ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_CONFIG[pt]['color'], alpha=0.6)
-                ax.set_xlim(-80, 80); ax.set_ylim(-80, 80); ax.set_title("変化量"); ax.grid(True, alpha=0.2); st.pyplot(fig)
-            with col2:
-                fig, ax = plt.subplots(figsize=(5, 5))
-                for pt in PITCH_LIST:
-                    d = target_df[target_df['TaggedPitchType'] == pt]
-                    if not d.empty: ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=PITCH_CONFIG[pt]['color'], alpha=0.6)
-                ax.set_xlim(-6, 6); ax.set_ylim(-6, 6); ax.set_title("リリースアングル"); ax.grid(True, alpha=0.2); st.pyplot(fig)
+            comp_item = st.sidebar.radio("比較項目を選択", ["変化量 (Break)", "リリースアングル (Angle)", "到達位置 (PlateLoc)"])
+            st.header(f"⚖️ {p1} vs {p2}：{comp_item}")
             
-            # 総合スタッツ
-            res = target_df.groupby('TaggedPitchType', observed=True).agg({'RelSpeed':'mean', 'SpinRate':'mean', 'InducedVertBreak':'mean', 'HorzBreak':'mean', 'VertRelAngle':'mean', 'HorzRelAngle':'mean'}).reset_index()
-            res = res.rename(columns={'RelSpeed':'球速', 'SpinRate':'回転数', 'InducedVertBreak':'縦変化', 'HorzBreak':'横変化', 'VertRelAngle':'アングル縦', 'HorzRelAngle':'アングル横'})
-            st.dataframe(res.style.format(precision=1), use_container_width=True)
-
+            cl, cr = st.columns(2)
+            if comp_item == "到達位置 (PlateLoc)":
+                for df_t, col, name in [(target_df1, cl, p1), (target_df2, cr, p2)]:
+                    with col:
+                        fig, ax = plt.subplots(figsize=(5, 5))
+                        ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, lw=2))
+                        d_s = df_t[df_t['BatterSide'] == 'Right']
+                        for pt in PITCH_LIST:
+                            d_p = d_s[d_s['TaggedPitchType'] == pt]
+                            if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_CONFIG[pt]['color'], alpha=0.6)
+                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(f"{name}: 対右"); ax.set_box_aspect(1); st.pyplot(fig)
+            else:
+                with cl: st.subheader(p1); st.pyplot(get_fig(target_df1, comp_item))
+                with cr: st.subheader(p2); st.pyplot(get_fig(target_df2, comp_item))
+            
+            st.markdown("---")
+            tbl_map = {"変化量 (Break)": {'InducedVertBreak':'縦変化', 'HorzBreak':'横変化'}, "リリースアングル (Angle)": {'VertRelAngle':'アングル縦', 'HorzRelAngle':'アングル横'}, "到達位置 (PlateLoc)": {'PlateLocHeight':'高さ', 'PlateLocSide':'横'}}
+            clt, crt = st.columns(2)
+            with clt: st.write(f"**{p1}**"); display_mini_table(target_df1, tbl_map[comp_item])
+            with crt: st.write(f"**{p2}**"); display_mini_table(target_df2, tbl_map[comp_item])
     else:
         st.warning("dataフォルダにCSVが見つかりません。")
