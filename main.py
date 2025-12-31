@@ -75,7 +75,6 @@ if check_password():
             filepath = os.path.join(DATA_DIR, filename)
             try:
                 temp_df = pd.read_csv(filepath)
-                # m -> cm 変換
                 for col in ['PlateLocSide', 'PlateLocHeight', 'RelPosSide', 'RelPosHeight']:
                     if col in temp_df.columns:
                         temp_df[col] = temp_df[col] * 100
@@ -91,26 +90,22 @@ if check_password():
         full_df = full_df.dropna(subset=['Date_dt'])
         full_df['Date_str'] = full_df['Date_dt'].dt.strftime('%Y-%m-%d')
 
-        # --- サイドバー：全モード共通の絞り込みUI ---
+        # --- サイドバー：共通メニュー ---
         st.sidebar.title("📊 MENU")
         mode = st.sidebar.radio("モード選択", ["総合レポート", "1人集中分析", "2人比較"])
         st.sidebar.markdown("---")
 
-        # 投手選択 (A)
         p1 = st.sidebar.selectbox("投手Aを選択", sorted(full_df['Pitcher'].unique()), key="p1_sel")
         p1_full = full_df[full_df['Pitcher'] == p1]
         
-        # ファイル・日付の絞り込み（全てのモードで反映）
         st.sidebar.subheader("📅 データ絞り込み")
         s_files = st.sidebar.multiselect("ファイル選択", sorted(p1_full['SeasonFile'].unique()))
         s_dates = st.sidebar.multiselect("日付選択", sorted(p1_full['Date_str'].unique(), reverse=True))
         
-        # 投手Aのフィルタ後データ
         target_df1 = p1_full.copy()
         if s_files: target_df1 = target_df1[target_df1['SeasonFile'].isin(s_files)]
         if s_dates: target_df1 = target_df1[target_df1['Date_str'].isin(s_dates)]
 
-        # 共通のグラフ描画関数
         def plot_scatter(df, mode_type, title_suffix=""):
             fig, ax = plt.subplots(figsize=(5, 5))
             for pt in PITCH_LIST:
@@ -130,9 +125,7 @@ if check_password():
             ax.set_title(title_suffix)
             return fig
 
-        # ==================================================
-        # 3. 各モードの表示
-        # ==================================================
+        # --- モード別表示 ---
         if mode == "総合レポート":
             st.header(f"📋 {p1} 投手：総合レポート")
             col1, col2 = st.columns(2)
@@ -154,8 +147,10 @@ if check_password():
                 st.info("左のサイドバーから表示項目を選択してください。")
 
             col_a, col_b = st.columns(2)
-            if show_brk: with col_a: st.pyplot(plot_scatter(target_df1, "break", "変化量 [cm]"))
-            if show_ang: with col_b: st.pyplot(plot_scatter(target_df1, "angle", "リリースアングル [度]"))
+            if show_brk:
+                with col_a: st.pyplot(plot_scatter(target_df1, "break", "変化量 [cm]"))
+            if show_ang:
+                with col_b: st.pyplot(plot_scatter(target_df1, "angle", "リリースアングル [度]"))
             if show_loc:
                 st.subheader("■ 到達位置 [cm] (左:対右打者 / 右:対左打者)")
                 c_r, c_l = st.columns(2)
@@ -168,7 +163,8 @@ if check_password():
                             d_p = d_s[d_s['TaggedPitchType'] == pt]
                             if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_CONFIG.get(pt)['color'], alpha=0.6)
                         ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(t); ax.set_aspect('equal'); st.pyplot(fig)
-            if show_pos: with col_a: st.pyplot(plot_scatter(target_df1, "pos", "リリース位置 [cm]"))
+            if show_pos:
+                with col_a: st.pyplot(plot_scatter(target_df1, "pos", "リリース位置 [cm]"))
             if show_table: 
                 st.subheader("📊 分析スタッツ")
                 display_custom_table(get_summary_df(target_df1))
@@ -177,8 +173,6 @@ if check_password():
             st.sidebar.markdown("---")
             p2 = st.sidebar.selectbox("投手Bを選択", sorted(full_df['Pitcher'].unique()), key="p2_sel")
             p2_full = full_df[full_df['Pitcher'] == p2]
-            
-            # 投手Bにも同じファイル/日付フィルタを適用
             target_df2 = p2_full.copy()
             if s_files: target_df2 = target_df2[target_df2['SeasonFile'].isin(s_files)]
             if s_dates: target_df2 = target_df2[target_df2['Date_str'].isin(s_dates)]
@@ -203,8 +197,8 @@ if check_password():
             if show_loc:
                 st.subheader("■ 到達位置 比較 (対右打者)")
                 cl, cr = st.columns(2)
-                for df_t, c, name in [(target_df1, cl, p1), (target_df2, cr, p2)]:
-                    with c:
+                for df_t, col, name in [(target_df1, cl, p1), (target_df2, cr, p2)]:
+                    with col:
                         fig, ax = plt.subplots(figsize=(5, 5))
                         ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False))
                         d_s = df_t[df_t['BatterSide'] == 'Right']
