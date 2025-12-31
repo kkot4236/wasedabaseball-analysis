@@ -91,14 +91,25 @@ if check_password():
         full_df = full_df.dropna(subset=['Date_dt'])
         full_df['Date_str'] = full_df['Date_dt'].dt.strftime('%Y-%m-%d')
 
+        # --- サイドバー：全モード共通の絞り込みUI ---
         st.sidebar.title("📊 MENU")
         mode = st.sidebar.radio("モード選択", ["総合レポート", "1人集中分析", "2人比較"])
         st.sidebar.markdown("---")
 
-        # 共通フィルターUI（基本は投手Aの設定）
+        # 投手選択 (A)
         p1 = st.sidebar.selectbox("投手Aを選択", sorted(full_df['Pitcher'].unique()), key="p1_sel")
-        p1_all = full_df[full_df['Pitcher'] == p1]
+        p1_full = full_df[full_df['Pitcher'] == p1]
         
+        # ファイル・日付の絞り込み（全てのモードで反映）
+        st.sidebar.subheader("📅 データ絞り込み")
+        s_files = st.sidebar.multiselect("ファイル選択", sorted(p1_full['SeasonFile'].unique()))
+        s_dates = st.sidebar.multiselect("日付選択", sorted(p1_full['Date_str'].unique(), reverse=True))
+        
+        # 投手Aのフィルタ後データ
+        target_df1 = p1_full.copy()
+        if s_files: target_df1 = target_df1[target_df1['SeasonFile'].isin(s_files)]
+        if s_dates: target_df1 = target_df1[target_df1['Date_str'].isin(s_dates)]
+
         # 共通のグラフ描画関数
         def plot_scatter(df, mode_type, title_suffix=""):
             fig, ax = plt.subplots(figsize=(5, 5))
@@ -119,15 +130,18 @@ if check_password():
             ax.set_title(title_suffix)
             return fig
 
+        # ==================================================
+        # 3. 各モードの表示
+        # ==================================================
         if mode == "総合レポート":
             st.header(f"📋 {p1} 投手：総合レポート")
             col1, col2 = st.columns(2)
-            with col1: st.pyplot(plot_scatter(p1_all, "break", "変化量散布図 [cm]"))
-            with col2: st.pyplot(plot_scatter(p1_all, "angle", "リリースアングル [度]"))
+            with col1: st.pyplot(plot_scatter(target_df1, "break", "変化量散布図 [cm]"))
+            with col2: st.pyplot(plot_scatter(target_df1, "angle", "リリースアングル [度]"))
             st.subheader("📊 総合スタッツ")
-            display_custom_table(get_summary_df(p1_all))
+            display_custom_table(get_summary_df(target_df1))
 
-        elif mode == "1人集中分析" or mode == "2人比較":
+        elif mode == "1人集中分析":
             st.sidebar.subheader("表示項目の選択")
             show_brk = st.sidebar.checkbox("変化量 (Break)", value=False)
             show_ang = st.sidebar.checkbox("リリースアングル (Angle)", value=False)
@@ -135,60 +149,71 @@ if check_password():
             show_pos = st.sidebar.checkbox("リリース位置 (RelPos)", value=False)
             show_table = st.sidebar.checkbox("集計データ表", value=False)
 
-            if mode == "1人集中分析":
-                st.header(f"👤 {p1} 投手：集中分析")
-                s_files = st.sidebar.multiselect("ファイル絞り込み", sorted(p1_all['SeasonFile'].unique()))
-                target_df = p1_all[p1_all['SeasonFile'].isin(s_files)] if s_files else p1_all
-                
-                col_a, col_b = st.columns(2)
-                if show_brk: 
-                    with col_a: st.pyplot(plot_scatter(target_df, "break", "変化量 [cm]"))
-                if show_ang: 
-                    with col_b: st.pyplot(plot_scatter(target_df, "angle", "リリースアングル [度]"))
-                if show_loc:
-                    st.subheader("■ 到達位置 [cm] (左:対右 / 右:対左)")
-                    c_r, c_l = st.columns(2)
-                    for s, c, t in [('Right', c_r, '対右'), ('Left', c_l, '対左')]:
-                        with c:
-                            fig, ax = plt.subplots(figsize=(5, 5))
-                            ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, color='black', lw=2))
-                            d_s = target_df[target_df['BatterSide'] == s]
-                            for pt in PITCH_LIST:
-                                d_p = d_s[d_s['TaggedPitchType'] == pt]
-                                if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_CONFIG.get(pt)['color'], alpha=0.6)
-                            ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(t); ax.set_aspect('equal'); st.pyplot(fig)
-                if show_pos:
-                    with col_a: st.pyplot(plot_scatter(target_df, "pos", "リリース位置 [cm]"))
-                if show_table: display_custom_table(get_summary_df(target_df))
+            st.header(f"👤 {p1} 投手：集中分析")
+            if not any([show_brk, show_ang, show_loc, show_pos, show_table]):
+                st.info("左のサイドバーから表示項目を選択してください。")
 
-            else: # 2人比較モード
-                p2 = st.sidebar.selectbox("投手Bを選択", sorted(full_df['Pitcher'].unique()), key="p2_sel")
-                p2_all = full_df[full_df['Pitcher'] == p2]
-                st.header(f"⚖️ 比較: {p1} vs {p2}")
-                
-                c_left, c_right = st.columns(2)
-                if show_brk:
-                    with c_left: st.pyplot(plot_scatter(p1_all, "break", f"{p1}: 変化量"))
-                    with c_right: st.pyplot(plot_scatter(p2_all, "break", f"{p2}: 変化量"))
-                if show_ang:
-                    with c_left: st.pyplot(plot_scatter(p1_all, "angle", f"{p1}: アングル"))
-                    with c_right: st.pyplot(plot_scatter(p2_all, "angle", f"{p2}: アングル"))
-                if show_loc:
-                    st.subheader("■ 到達位置 比較 (対右打者)")
-                    with c_left:
-                        fig, ax = plt.subplots(figsize=(5, 5)); ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False)); d_s = p1_all[p1_all['BatterSide'] == 'Right']
+            col_a, col_b = st.columns(2)
+            if show_brk: with col_a: st.pyplot(plot_scatter(target_df1, "break", "変化量 [cm]"))
+            if show_ang: with col_b: st.pyplot(plot_scatter(target_df1, "angle", "リリースアングル [度]"))
+            if show_loc:
+                st.subheader("■ 到達位置 [cm] (左:対右打者 / 右:対左打者)")
+                c_r, c_l = st.columns(2)
+                for s, c, t in [('Right', c_r, '対 右打者'), ('Left', c_l, '対 左打者')]:
+                    with c:
+                        fig, ax = plt.subplots(figsize=(5, 5))
+                        ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, color='black', lw=2))
+                        d_s = target_df1[target_df1['BatterSide'] == s]
                         for pt in PITCH_LIST:
                             d_p = d_s[d_s['TaggedPitchType'] == pt]
                             if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_CONFIG.get(pt)['color'], alpha=0.6)
-                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(f"{p1}: 対右"); st.pyplot(fig)
-                    with c_right:
-                        fig, ax = plt.subplots(figsize=(5, 5)); ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False)); d_s = p2_all[p2_all['BatterSide'] == 'Right']
+                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(t); ax.set_aspect('equal'); st.pyplot(fig)
+            if show_pos: with col_a: st.pyplot(plot_scatter(target_df1, "pos", "リリース位置 [cm]"))
+            if show_table: 
+                st.subheader("📊 分析スタッツ")
+                display_custom_table(get_summary_df(target_df1))
+
+        elif mode == "2人比較":
+            st.sidebar.markdown("---")
+            p2 = st.sidebar.selectbox("投手Bを選択", sorted(full_df['Pitcher'].unique()), key="p2_sel")
+            p2_full = full_df[full_df['Pitcher'] == p2]
+            
+            # 投手Bにも同じファイル/日付フィルタを適用
+            target_df2 = p2_full.copy()
+            if s_files: target_df2 = target_df2[target_df2['SeasonFile'].isin(s_files)]
+            if s_dates: target_df2 = target_df2[target_df2['Date_str'].isin(s_dates)]
+
+            st.sidebar.subheader("表示項目の選択")
+            show_brk = st.sidebar.checkbox("変化量 (Break)", value=False, key="brk_c")
+            show_ang = st.sidebar.checkbox("リリースアングル (Angle)", value=False, key="ang_c")
+            show_loc = st.sidebar.checkbox("到達位置 (PlateLoc)", value=False, key="loc_c")
+            show_table = st.sidebar.checkbox("集計データ表", value=False, key="tbl_c")
+
+            st.header(f"⚖️ 比較: {p1} vs {p2}")
+            if not any([show_brk, show_ang, show_loc, show_table]):
+                st.info("左のサイドバーから表示項目を選択してください。")
+
+            c_left, c_right = st.columns(2)
+            if show_brk:
+                with c_left: st.pyplot(plot_scatter(target_df1, "break", f"{p1}: 変化量"))
+                with c_right: st.pyplot(plot_scatter(target_df2, "break", f"{p2}: 変化量"))
+            if show_ang:
+                with c_left: st.pyplot(plot_scatter(target_df1, "angle", f"{p1}: リリースアングル"))
+                with c_right: st.pyplot(plot_scatter(target_df2, "angle", f"{p2}: リリースアングル"))
+            if show_loc:
+                st.subheader("■ 到達位置 比較 (対右打者)")
+                cl, cr = st.columns(2)
+                for df_t, c, name in [(target_df1, cl, p1), (target_df2, cr, p2)]:
+                    with c:
+                        fig, ax = plt.subplots(figsize=(5, 5))
+                        ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False))
+                        d_s = df_t[df_t['BatterSide'] == 'Right']
                         for pt in PITCH_LIST:
                             d_p = d_s[d_s['TaggedPitchType'] == pt]
                             if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_CONFIG.get(pt)['color'], alpha=0.6)
-                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(f"{p2}: 対右"); st.pyplot(fig)
-                if show_table:
-                    with c_left: st.subheader(p1); display_custom_table(get_summary_df(p1_all))
-                    with c_right: st.subheader(p2); display_custom_table(get_summary_df(p2_all))
+                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(f"{name}: 対右"); st.pyplot(fig)
+            if show_table:
+                with c_left: st.subheader(p1); display_custom_table(get_summary_df(target_df1))
+                with c_right: st.subheader(p2); display_custom_table(get_summary_df(target_df2))
     else:
         st.warning("dataフォルダにCSVが見つかりません。")
