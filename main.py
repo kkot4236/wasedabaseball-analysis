@@ -14,7 +14,7 @@ def check_password():
         return True
 
     def password_entered():
-        if st.session_state["password_input"] == "wbc1901":
+        if st.session_state["password_input"] == "waseda123":
             st.session_state["password_correct"] = True
         else:
             st.session_state["password_correct"] = False
@@ -37,7 +37,7 @@ if check_password():
     }
 
     # ==================================================
-    # 共通：集計表作成関数（フルバージョン）
+    # 共通：集計表作成関数
     # ==================================================
     def display_full_summary_table(df):
         if df.empty: return
@@ -53,14 +53,10 @@ if check_password():
             アングル横=('HorzRelAngle', 'mean')
         ).reset_index()
         
-        # 投球割合の計算
         res['投球割合(球数)'] = res['count'].apply(lambda x: f"{x/total_pitches*100:.1f}% ({x})")
-        
-        # 表示順序と球種の日本語化対応
         res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
         res = res.sort_values('TaggedPitchType').dropna(subset=['TaggedPitchType'])
         
-        # カラムの並べ替えと名称確定
         res = res[['TaggedPitchType', '投球割合(球数)', '平均球速', '最高球速', '回転数', '縦変化', '横変化', 'アングル縦', 'アングル横']]
         res = res.rename(columns={
             'TaggedPitchType': '球種',
@@ -106,8 +102,8 @@ if check_password():
         if s_files: target_df1 = target_df1[target_df1['SeasonFile'].isin(s_files)]
         if s_dates: target_df1 = target_df1[target_df1['Date_str'].isin(s_dates)]
 
-        # --- 共通グラフ関数（正方形固定） ---
-        def get_fig(df, mode_name):
+        # --- 共通グラフ関数（タイトル対応） ---
+        def get_fig(df, mode_name, title_text):
             fig, ax = plt.subplots(figsize=(5, 5))
             for pt in PITCH_LIST:
                 d = df[df['TaggedPitchType'] == pt]
@@ -124,14 +120,15 @@ if check_password():
                     ax.set_xlim(-150, 150); ax.set_ylim(0, 300)
             ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1)
             ax.set_box_aspect(1)
+            ax.set_title(title_text, fontsize=12, fontweight='bold')
             ax.grid(True, alpha=0.3)
             return fig
 
         if mode == "総合レポート":
             st.header(f"📋 {p1} 投手：総合レポート")
             c1, c2 = st.columns(2)
-            with c1: st.pyplot(get_fig(target_df1, "変化量 (Break)"))
-            with c2: st.pyplot(get_fig(target_df1, "リリースアングル (Angle)"))
+            with c1: st.pyplot(get_fig(target_df1, "変化量 (Break)", "変化量 [cm]"))
+            with c2: st.pyplot(get_fig(target_df1, "リリースアングル (Angle)", "リリースアングル [度]"))
             st.subheader("📊 総合集計スタッツ")
             display_full_summary_table(target_df1)
 
@@ -142,7 +139,7 @@ if check_password():
 
             if analysis_item == "到達位置 (PlateLoc)":
                 c1, c2 = st.columns(2)
-                for side, col, title in [('Right', c1, '対 右打者'), ('Left', c2, '対 左打者')]:
+                for side, col, title in [('Right', c1, '到達位置: 対 右打者'), ('Left', c2, '到達位置: 対 左打者')]:
                     with col:
                         fig, ax = plt.subplots(figsize=(5, 5))
                         ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, lw=2))
@@ -150,9 +147,9 @@ if check_password():
                         for pt in PITCH_LIST:
                             d_p = d_s[d_s['TaggedPitchType'] == pt]
                             if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_CONFIG[pt]['color'], alpha=0.6)
-                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(title); ax.set_box_aspect(1); st.pyplot(fig)
+                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(title, fontweight='bold'); ax.set_box_aspect(1); st.pyplot(fig)
             else:
-                st.pyplot(get_fig(target_df1, analysis_item))
+                st.pyplot(get_fig(target_df1, analysis_item, analysis_item))
             
             st.subheader("📊 球種別スタッツ")
             display_full_summary_table(target_df1)
@@ -177,10 +174,10 @@ if check_password():
                         for pt in PITCH_LIST:
                             d_p = d_s[d_s['TaggedPitchType'] == pt]
                             if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_CONFIG[pt]['color'], alpha=0.6)
-                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(f"{name}: 対右"); ax.set_box_aspect(1); st.pyplot(fig)
+                        ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(f"{name}: 対右", fontweight='bold'); ax.set_box_aspect(1); st.pyplot(fig)
             else:
-                with cl: st.subheader(p1); st.pyplot(get_fig(target_df1, comp_item))
-                with cr: st.subheader(p2); st.pyplot(get_fig(target_df2, comp_item))
+                with cl: st.pyplot(get_fig(target_df1, comp_item, f"{p1}: {comp_item}"))
+                with cr: st.pyplot(get_fig(target_df2, comp_item, f"{p2}: {comp_item}"))
             
             st.markdown("---")
             st.subheader(f"📊 {p1} のスタッツ")
