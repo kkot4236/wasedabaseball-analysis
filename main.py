@@ -36,13 +36,40 @@ if check_password():
         'Sinker': {'color': '#FFA500', 'marker': 'v'}, 'TwoSeamFastBall': {'color': '#FF8C00', 'marker': 'o'}, 
     }
 
-    def display_mini_table(df, cols_rename):
+    # ==================================================
+    # 共通：集計表作成関数（フルバージョン）
+    # ==================================================
+    def display_full_summary_table(df):
         if df.empty: return
-        res = df.groupby('TaggedPitchType', observed=True).agg({k: 'mean' for k in cols_rename.keys()}).reset_index()
+        total_pitches = len(df)
+        res = df.groupby('TaggedPitchType', observed=True).agg(
+            count=('Pitcher', 'count'),
+            平均球速=('RelSpeed', 'mean'),
+            最高球速=('RelSpeed', 'max'),
+            回転数=('SpinRate', 'mean'),
+            縦変化=('InducedVertBreak', 'mean'),
+            横変化=('HorzBreak', 'mean'),
+            アングル縦=('VertRelAngle', 'mean'),
+            アングル横=('HorzRelAngle', 'mean')
+        ).reset_index()
+        
+        # 投球割合の計算
+        res['投球割合(球数)'] = res['count'].apply(lambda x: f"{x/total_pitches*100:.1f}% ({x})")
+        
+        # 表示順序と球種の日本語化対応
         res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
         res = res.sort_values('TaggedPitchType').dropna(subset=['TaggedPitchType'])
-        res = res.rename(columns={'TaggedPitchType': '球種', **cols_rename})
-        st.dataframe(res.style.format(precision=1), use_container_width=True)
+        
+        # カラムの並べ替えと名称確定
+        res = res[['TaggedPitchType', '投球割合(球数)', '平均球速', '最高球速', '回転数', '縦変化', '横変化', 'アングル縦', 'アングル横']]
+        res = res.rename(columns={
+            'TaggedPitchType': '球種',
+            '平均球速': '平均(km/h)', '最高球速': '最高(km/h)',
+            '縦変化': '縦変化(cm)', '横変化': '横変化(cm)',
+            'アングル縦': 'リリースアングル(縦)', 'アングル横': 'リリースアングル(横)'
+        })
+        
+        st.dataframe(res.style.format(precision=1, subset=['平均(km/h)', '最高(km/h)', '回転数', '縦変化(cm)', '横変化(cm)', 'リリースアングル(縦)', 'リリースアングル(横)']), use_container_width=True)
 
     # データ読み込み
     DATA_DIR = "data"
@@ -81,7 +108,7 @@ if check_password():
 
         # --- 共通グラフ関数（正方形固定） ---
         def get_fig(df, mode_name):
-            fig, ax = plt.subplots(figsize=(5, 5)) # サイズを固定
+            fig, ax = plt.subplots(figsize=(5, 5))
             for pt in PITCH_LIST:
                 d = df[df['TaggedPitchType'] == pt]
                 if d.empty: continue
@@ -94,9 +121,9 @@ if check_password():
                     ax.set_xlim(-6, 6); ax.set_ylim(-6, 6)
                 elif mode_name == "リリース位置 (RelPos)":
                     ax.scatter(d['RelPosSide'], d['RelPosHeight'], color=cfg['color'], label=pt, alpha=0.6)
-                    ax.set_xlim(-150, 150); ax.set_ylim(0, 300) # 300で正方形を維持
+                    ax.set_xlim(-150, 150); ax.set_ylim(0, 300)
             ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1)
-            ax.set_box_aspect(1) # グラフ領域を正方形に強制
+            ax.set_box_aspect(1)
             ax.grid(True, alpha=0.3)
             return fig
 
@@ -105,8 +132,8 @@ if check_password():
             c1, c2 = st.columns(2)
             with c1: st.pyplot(get_fig(target_df1, "変化量 (Break)"))
             with c2: st.pyplot(get_fig(target_df1, "リリースアングル (Angle)"))
-            st.subheader("📊 総合スタッツ")
-            display_mini_table(target_df1, {'RelSpeed':'平均球速', 'SpinRate':'平均回転数', 'InducedVertBreak':'縦変化(cm)', 'HorzBreak':'横変化(cm)', 'VertRelAngle':'アングル縦', 'HorzRelAngle':'アングル横'})
+            st.subheader("📊 総合集計スタッツ")
+            display_full_summary_table(target_df1)
 
         elif mode == "1人集中分析":
             st.sidebar.subheader("👁 分析項目の選択")
@@ -124,11 +151,11 @@ if check_password():
                             d_p = d_s[d_s['TaggedPitchType'] == pt]
                             if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_CONFIG[pt]['color'], alpha=0.6)
                         ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(title); ax.set_box_aspect(1); st.pyplot(fig)
-                display_mini_table(target_df1, {'PlateLocHeight': '到達高さ(cm)', 'PlateLocSide': '到達横(cm)'})
             else:
                 st.pyplot(get_fig(target_df1, analysis_item))
-                tbl_map = {"変化量 (Break)": {'InducedVertBreak': '縦変化(cm)', 'HorzBreak': '横変化(cm)'}, "リリースアングル (Angle)": {'VertRelAngle': 'アングル縦', 'HorzRelAngle': 'アングル横'}, "リリース位置 (RelPos)": {'RelPosHeight': 'リリース高(cm)', 'RelPosSide': 'リリースサイド(cm)'}}
-                display_mini_table(target_df1, tbl_map[analysis_item])
+            
+            st.subheader("📊 球種別スタッツ")
+            display_full_summary_table(target_df1)
 
         elif mode == "2人比較":
             st.sidebar.markdown("---")
@@ -156,9 +183,9 @@ if check_password():
                 with cr: st.subheader(p2); st.pyplot(get_fig(target_df2, comp_item))
             
             st.markdown("---")
-            tbl_map = {"変化量 (Break)": {'InducedVertBreak':'縦変化', 'HorzBreak':'横変化'}, "リリースアングル (Angle)": {'VertRelAngle':'アングル縦', 'HorzRelAngle':'アングル横'}, "到達位置 (PlateLoc)": {'PlateLocHeight':'高さ', 'PlateLocSide':'横'}}
-            clt, crt = st.columns(2)
-            with clt: st.write(f"**{p1}**"); display_mini_table(target_df1, tbl_map[comp_item])
-            with crt: st.write(f"**{p2}**"); display_mini_table(target_df2, tbl_map[comp_item])
+            st.subheader(f"📊 {p1} のスタッツ")
+            display_full_summary_table(target_df1)
+            st.subheader(f"📊 {p2} のスタッツ")
+            display_full_summary_table(target_df2)
     else:
         st.warning("dataフォルダにCSVが見つかりません。")
