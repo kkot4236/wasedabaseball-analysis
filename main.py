@@ -126,7 +126,7 @@ if check_password():
         target_df1 = p1_df.copy()
         if s_dates: target_df1 = target_df1[target_df1['Date_str'].isin(s_dates)]
 
-        # --- 1. 総合レポート (以前の形式を維持) ---
+        # --- 1. 総合レポート ---
         if mode == "総合レポート":
             st.header(f"📋 {p1} 投手：総合レポート")
             c1, c2 = st.columns(2)
@@ -135,63 +135,67 @@ if check_password():
             st.subheader("📊 総合集計スタッツ")
             display_full_pro_table(target_df1)
 
-        # --- 2. 1人集中分析 (新機能を大幅追加) ---
+        # --- 2. 1人集中分析 ---
         elif mode == "1人集中分析":
             st.sidebar.markdown("---")
             available_pitches = sorted(target_df1['TaggedPitchType'].unique())
             selected_pitches = st.sidebar.multiselect("表示する球種", available_pitches, default=available_pitches)
-            filtered_df1 = target_df1[target_df1['TaggedPitchType'].isin(selected_pitches)]
+            filtered_df1 = target_df1[target_df1['TaggedPitchType'].isin(selected_pitches)].copy()
 
             item = st.sidebar.radio("分析項目", [
-                "変化量詳細", 
-                "到達位置", 
-                "3Dリリースポイント", 
-                "リリース位置の安定度", 
-                "球速・回転数の分布",
-                "球速 vs 変化量相関",
-                "カウント別傾向"
+                "変化量詳細", "到達位置", "3Dリリースポイント", 
+                "リリース位置の安定度", "球速・回転数の分布",
+                "球速 vs 変化量相関", "カウント別傾向"
             ])
             st.header(f"👤 {p1}：{item}")
 
-            if item == "変化量詳細":
-                st.pyplot(get_square_fig(filtered_df1, "変化量", "変化量分布", p1_throws, selected_pitches))
+            if filtered_df1.empty:
+                st.warning("表示するデータがありません。球種を選択してください。")
+            else:
+                if item == "変化量詳細":
+                    st.pyplot(get_square_fig(filtered_df1, "変化量", "変化量分布", p1_throws, selected_pitches))
 
-            elif item == "到達位置":
-                c1, c2 = st.columns(2)
-                for side, col in [('Right', c1), ('Left', c2)]:
-                    with col:
-                        fig, ax = plt.subplots(figsize=(6, 5)); ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, lw=2))
-                        d_s = filtered_df1[filtered_df1['BatterSide']==side]
-                        for pt in selected_pitches:
-                            d_p = d_s[d_s['TaggedPitchType']==pt]
-                            if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_COLORS[pt], marker=get_marker(pt, p1_throws), label=pt, alpha=0.6)
-                        ax.set_xlim(-100,100); ax.set_ylim(0,200); ax.set_box_aspect(1); ax.set_title(f"対 {side}打者"); ax.legend(bbox_to_anchor=(1.05, 1)); st.pyplot(fig)
+                elif item == "到達位置":
+                    c1, c2 = st.columns(2)
+                    for side, col in [('Right', c1), ('Left', c2)]:
+                        with col:
+                            fig, ax = plt.subplots(figsize=(6, 5)); ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, lw=2))
+                            d_s = filtered_df1[filtered_df1['BatterSide']==side]
+                            for pt in selected_pitches:
+                                d_p = d_s[d_s['TaggedPitchType']==pt]
+                                if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_COLORS[pt], marker=get_marker(pt, p1_throws), label=pt, alpha=0.6)
+                            ax.set_xlim(-100,100); ax.set_ylim(0,200); ax.set_box_aspect(1); ax.set_title(f"対 {side}打者"); ax.legend(bbox_to_anchor=(1.05, 1)); st.pyplot(fig)
 
-            elif item == "3Dリリースポイント":
-                fig = px.scatter_3d(filtered_df1, x='RelPosSide', y='Extension', z='RelPosHeight', color='TaggedPitchType', color_discrete_map=PITCH_COLORS, opacity=0.7)
-                st.plotly_chart(fig, use_container_width=True)
+                elif item == "3Dリリースポイント":
+                    # エラー対策：選択された球種のみの色設定を作成
+                    current_colors = {pt: PITCH_COLORS[pt] for pt in filtered_df1['TaggedPitchType'].unique() if pt in PITCH_COLORS}
+                    fig = px.scatter_3d(filtered_df1, x='RelPosSide', y='Extension', z='RelPosHeight', color='TaggedPitchType', color_discrete_map=current_colors, opacity=0.7)
+                    st.plotly_chart(fig, use_container_width=True)
 
-            elif item == "リリース位置の安定度":
-                fig, ax = plt.subplots(figsize=(6, 6))
-                for pt in selected_pitches:
-                    d = filtered_df1[filtered_df1['TaggedPitchType'] == pt]
-                    if not d.empty: ax.scatter(d['RelPosSide'], d['RelPosHeight'], color=PITCH_COLORS[pt], label=pt, alpha=0.6, marker=get_marker(pt, p1_throws))
-                ax.set_xlabel("横リリース [cm]"); ax.set_ylabel("高さリリース [cm]"); ax.set_box_aspect(1); ax.grid(True, alpha=0.3); ax.legend(bbox_to_anchor=(1.05, 1))
-                st.pyplot(fig)
+                elif item == "リリース位置の安定度":
+                    fig, ax = plt.subplots(figsize=(6, 6))
+                    for pt in selected_pitches:
+                        d = filtered_df1[filtered_df1['TaggedPitchType'] == pt]
+                        if not d.empty: ax.scatter(d['RelPosSide'], d['RelPosHeight'], color=PITCH_COLORS[pt], label=pt, alpha=0.6, marker=get_marker(pt, p1_throws))
+                    ax.set_xlabel("横リリース [cm]"); ax.set_ylabel("高さリリース [cm]"); ax.set_box_aspect(1); ax.grid(True, alpha=0.3); ax.legend(bbox_to_anchor=(1.05, 1))
+                    st.pyplot(fig)
 
-            elif item == "球速・回転数の分布":
-                c1, c2 = st.columns(2)
-                with c1: st.plotly_chart(px.box(filtered_df1, x="TaggedPitchType", y="RelSpeed", color="TaggedPitchType", color_discrete_map=PITCH_COLORS, title="球速のバラつき"), use_container_width=True)
-                with c2: st.plotly_chart(px.box(filtered_df1, x="TaggedPitchType", y="SpinRate", color="TaggedPitchType", color_discrete_map=PITCH_COLORS, title="回転数のバラつき"), use_container_width=True)
+                elif item == "球速・回転数の分布":
+                    current_colors = {pt: PITCH_COLORS[pt] for pt in filtered_df1['TaggedPitchType'].unique() if pt in PITCH_COLORS}
+                    c1, c2 = st.columns(2)
+                    with c1: st.plotly_chart(px.box(filtered_df1, x="TaggedPitchType", y="RelSpeed", color="TaggedPitchType", color_discrete_map=current_colors, title="球速のバラつき"), use_container_width=True)
+                    with c2: st.plotly_chart(px.box(filtered_df1, x="TaggedPitchType", y="SpinRate", color="TaggedPitchType", color_discrete_map=current_colors, title="回転数のバラつき"), use_container_width=True)
 
-            elif item == "球速 vs 変化量相関":
-                fig = px.scatter(filtered_df1, x="RelSpeed", y="InducedVertBreak", color="TaggedPitchType", color_discrete_map=PITCH_COLORS, hover_data=['Date'], title="球速と縦変化の関係")
-                st.plotly_chart(fig, use_container_width=True)
+                elif item == "球速 vs 変化量相関":
+                    current_colors = {pt: PITCH_COLORS[pt] for pt in filtered_df1['TaggedPitchType'].unique() if pt in PITCH_COLORS}
+                    fig = px.scatter(filtered_df1, x="RelSpeed", y="InducedVertBreak", color="TaggedPitchType", color_discrete_map=current_colors, hover_data=['Date_str'], title="球速と縦変化の関係")
+                    st.plotly_chart(fig, use_container_width=True)
 
-            elif item == "カウント別傾向":
-                target_df1['Count'] = target_df1['Balls'].astype(str) + "-" + target_df1['Strikes'].astype(str)
-                count_data = target_df1.groupby(['Count', 'TaggedPitchType'], observed=True).size().unstack(fill_value=0)
-                st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
+                elif item == "カウント別傾向":
+                    filtered_df1['Count'] = filtered_df1['Balls'].astype(str) + "-" + filtered_df1['Strikes'].astype(str)
+                    count_data = filtered_df1.groupby(['Count', 'TaggedPitchType'], observed=True).size().unstack(fill_value=0)
+                    if not count_data.empty:
+                        st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
             
             st.subheader("📊 詳細スタッツ")
             display_full_pro_table(filtered_df1)
