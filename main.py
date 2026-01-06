@@ -11,7 +11,7 @@ def check_password():
         st.session_state["password_correct"] = None
     if st.session_state["password_correct"] == True: return True
     def password_entered():
-        if st.session_state["password_input"] == "waseda123":
+        if st.session_state["password_input"] == "wbc1901":
             st.session_state["password_correct"] = True
         else:
             st.session_state["password_correct"] = False
@@ -54,8 +54,12 @@ if check_password():
         actual_agg['Pitcher'] = 'count'
         
         res = df.groupby('TaggedPitchType', observed=True).agg(actual_agg).reset_index()
-        res['Whiff%'] = df.groupby('TaggedPitchType', observed=True).apply(lambda x: (x['is_whiff'].sum() / x['is_swing'].sum() * 100) if x['is_swing'].sum() > 0 else 0).values
-        res['Strike%'] = df.groupby('TaggedPitchType', observed=True).apply(lambda x: x['is_strike'].mean() * 100).values
+        
+        # 指標の計算
+        whiff_res = df.groupby('TaggedPitchType', observed=True).apply(lambda x: (x['is_whiff'].sum() / x['is_swing'].sum() * 100) if x['is_swing'].sum() > 0 else 0).reset_index(name='Whiff%')
+        strike_res = df.groupby('TaggedPitchType', observed=True).apply(lambda x: x['is_strike'].mean() * 100).reset_index(name='Strike%')
+        
+        res = res.merge(whiff_res, on='TaggedPitchType').merge(strike_res, on='TaggedPitchType')
         res['投球割合(球数)'] = res['Pitcher'].apply(lambda x: f"{x/total*100:.1f}% ({x})")
         
         res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
@@ -72,6 +76,7 @@ if check_password():
                 num_cols = ['RelSpeed', 'InducedVertBreak', 'HorzBreak', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle', 'HorzRelAngle', 'SpinRate', 'PlateLocSide', 'PlateLocHeight']
                 for c in num_cols:
                     if c in temp.columns: temp[c] = pd.to_numeric(temp[c], errors='coerce')
+                # フィートからセンチメートルへの変換（必要な場合）
                 for c in ['RelHeight', 'RelSide', 'Extension', 'PlateLocSide', 'PlateLocHeight']:
                     if c in temp.columns: temp[c] = temp[c] * 100
                 temp['SeasonFile'] = f
@@ -87,7 +92,6 @@ if check_password():
         mode = st.sidebar.radio("モード選択", ["総合レポート", "1人集中分析", "2人比較"])
         p1 = st.sidebar.selectbox("投手を選択", sorted(full_df['Pitcher'].unique().astype(str)))
         
-        # 投手1のデータ絞り込み
         p1_full = full_df[full_df['Pitcher'].astype(str) == p1].copy()
         s_files = st.sidebar.multiselect("ファイル選択", sorted(p1_full['SeasonFile'].unique()), key="f1")
         s_dates = st.sidebar.multiselect("日付選択", sorted(p1_full['Date_str'].dropna().unique(), reverse=True), key="d1")
@@ -100,77 +104,87 @@ if check_password():
             st.header(f"📋 {p1} 投手：総合レポート")
             c1, c2 = st.columns(2)
             with c1:
-                fig, ax = plt.subplots(); 
+                fig, ax = plt.subplots(figsize=(6, 6)) # サイズを正方形に固定
                 for pt in PITCH_LIST:
                     d = target_df1[target_df1['TaggedPitchType']==pt]
-                    if not d.empty: ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
-                ax.axvline(0); ax.axhline(0); ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_title("変化量(cm)"); st.pyplot(fig)
+                    if not d.empty: ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6, marker=get_marker(pt, p1_throws))
+                ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1); ax.set_xlim(-80,80); ax.set_ylim(-80,80)
+                ax.set_title("変化量(cm)"); ax.set_box_aspect(1); st.pyplot(fig)
             with c2:
-                fig, ax = plt.subplots();
+                fig, ax = plt.subplots(figsize=(6, 6))
                 for pt in PITCH_LIST:
                     d = target_df1[target_df1['TaggedPitchType']==pt]
-                    if not d.empty: ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
-                ax.axvline(0); ax.axhline(0); ax.set_xlim(-6,6); ax.set_ylim(-6,6); ax.set_title("リリースアングル"); st.pyplot(fig)
+                    if not d.empty: ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6, marker=get_marker(pt, p1_throws))
+                ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1); ax.set_xlim(-6,6); ax.set_ylim(-6,6)
+                ax.set_title("リリースアングル"); ax.set_box_aspect(1); st.pyplot(fig)
             display_full_pro_table(target_df1)
 
         elif mode == "1人集中分析":
             item = st.sidebar.radio("分析項目", ["変化量詳細", "到達位置", "3Dリリースポイント", "リリース位置の安定度", "球速・回転数の分布", "球速 vs 変化量相関", "カウント別傾向"])
             st.header(f"👤 {p1}：{item}")
-            # (1人分析の各ロジックは前回同様に動作)
-            if item == "3Dリリースポイント":
-                plot_df = target_df1.dropna(subset=['RelSide', 'Extension', 'RelHeight'])
-                st.plotly_chart(px.scatter_3d(plot_df, x='RelSide', y='Extension', z='RelHeight', color='TaggedPitchType', color_discrete_map=PITCH_COLORS), use_container_width=True)
-            elif item == "変化量詳細":
-                fig, ax = plt.subplots(); 
+            
+            if item == "変化量詳細":
+                fig, ax = plt.subplots(figsize=(6, 6))
                 for pt in target_df1['TaggedPitchType'].unique():
                     d = target_df1[target_df1['TaggedPitchType']==pt]
-                    ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
-                ax.axvline(0); ax.axhline(0); ax.set_xlim(-80,80); ax.set_ylim(-80,80); plt.legend(bbox_to_anchor=(1.05, 1)); st.pyplot(fig)
-            # ... (他の項目も同様)
+                    ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6, marker=get_marker(pt, p1_throws))
+                ax.axvline(0); ax.axhline(0); ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_box_aspect(1); plt.legend(bbox_to_anchor=(1.05, 1)); st.pyplot(fig)
+            elif item == "到達位置":
+                c1, c2 = st.columns(2)
+                for side, col in [('Right', c1), ('Left', c2)]:
+                    with col:
+                        fig, ax = plt.subplots(figsize=(6, 6)); ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, lw=2))
+                        d_s = target_df1[target_df1['BatterSide']==side]
+                        for pt in target_df1['TaggedPitchType'].unique():
+                            d_p = d_s[d_s['TaggedPitchType']==pt]
+                            if not d_p.empty: ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
+                        ax.set_xlim(-100,100); ax.set_ylim(0,200); ax.set_box_aspect(1); ax.set_title(f"対 {side}打者"); st.pyplot(fig)
+            elif item == "3Dリリースポイント":
+                plot_df = target_df1.dropna(subset=['RelSide', 'Extension', 'RelHeight'])
+                st.plotly_chart(px.scatter_3d(plot_df, x='RelSide', y='Extension', z='RelHeight', color='TaggedPitchType', color_discrete_map=PITCH_COLORS), use_container_width=True)
+            elif item == "リリース位置の安定度":
+                fig, ax = plt.subplots(figsize=(6, 6))
+                for pt in target_df1['TaggedPitchType'].unique():
+                    d = target_df1[target_df1['TaggedPitchType']==pt]
+                    ax.scatter(d['RelSide'], d['RelHeight'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
+                ax.set_xlim(-150,150); ax.set_ylim(0,250); ax.set_box_aspect(1); st.pyplot(fig)
+            elif item == "球速・回転数の分布":
+                c1, c2 = st.columns(2)
+                with c1: st.plotly_chart(px.box(target_df1, x="TaggedPitchType", y="RelSpeed", color="TaggedPitchType", color_discrete_map=PITCH_COLORS), use_container_width=True)
+                with c2: st.plotly_chart(px.box(target_df1, x="TaggedPitchType", y="SpinRate", color="TaggedPitchType", color_discrete_map=PITCH_COLORS), use_container_width=True)
+            elif item == "球速 vs 変化量相関":
+                st.plotly_chart(px.scatter(target_df1, x="RelSpeed", y="InducedVertBreak", color="TaggedPitchType", color_discrete_map=PITCH_COLORS), use_container_width=True)
+            elif item == "カウント別傾向":
+                target_df1['Count'] = target_df1['Balls'].fillna(0).astype(int).astype(str) + "-" + target_df1['Strikes'].fillna(0).astype(int).astype(str)
+                count_data = target_df1.groupby(['Count', 'TaggedPitchType'], observed=True).size().unstack(fill_value=0)
+                st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
+            
             display_full_pro_table(target_df1)
 
         elif mode == "2人比較":
             st.sidebar.markdown("---")
             p2 = st.sidebar.selectbox("比較対象(投手2)を選択", sorted(full_df['Pitcher'].unique().astype(str)), index=min(1, len(full_df['Pitcher'].unique())-1))
             p2_full = full_df[full_df['Pitcher'].astype(str) == p2].copy()
-            
             comp_item = st.sidebar.radio("比較項目", ["変化量", "リリース位置", "球速分布"])
             
             st.header(f"⚖️ {p1} vs {p2}")
             col1, col2 = st.columns(2)
             
-            with col1:
-                st.subheader(f"👤 {p1}")
-                if comp_item == "変化量":
-                    fig, ax = plt.subplots(); 
-                    for pt in PITCH_LIST:
-                        d = target_df1[target_df1['TaggedPitchType']==pt]
-                        if not d.empty: ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
-                    ax.axvline(0); ax.axhline(0); ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_title("変化量(cm)"); st.pyplot(fig)
-                elif comp_item == "リリース位置":
-                    fig, ax = plt.subplots();
-                    for pt in PITCH_LIST:
-                        d = target_df1[target_df1['TaggedPitchType']==pt]
-                        if not d.empty: ax.scatter(d['RelSide'], d['RelHeight'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
-                    ax.set_xlim(-150,150); ax.set_ylim(0,250); ax.set_title("リリース位置(正面)"); st.pyplot(fig)
-                elif comp_item == "球速分布":
-                    st.plotly_chart(px.box(target_df1, x='TaggedPitchType', y='RelSpeed', color='TaggedPitchType', color_discrete_map=PITCH_COLORS), use_container_width=True)
-                display_full_pro_table(target_df1)
-
-            with col2:
-                st.subheader(f"👤 {p2}")
-                if comp_item == "変化量":
-                    fig, ax = plt.subplots(); 
-                    for pt in PITCH_LIST:
-                        d = p2_full[p2_full['TaggedPitchType']==pt]
-                        if not d.empty: ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
-                    ax.axvline(0); ax.axhline(0); ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_title("変化量(cm)"); st.pyplot(fig)
-                elif comp_item == "リリース位置":
-                    fig, ax = plt.subplots();
-                    for pt in PITCH_LIST:
-                        d = p2_full[p2_full['TaggedPitchType']==pt]
-                        if not d.empty: ax.scatter(d['RelSide'], d['RelHeight'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
-                    ax.set_xlim(-150,150); ax.set_ylim(0,250); ax.set_title("リリース位置(正面)"); st.pyplot(fig)
-                elif comp_item == "球速分布":
-                    st.plotly_chart(px.box(p2_full, x='TaggedPitchType', y='RelSpeed', color='TaggedPitchType', color_discrete_map=PITCH_COLORS), use_container_width=True)
-                display_full_pro_table(p2_full)
+            for d, col, name in [(target_df1, col1, p1), (p2_full, col2, p2)]:
+                with col:
+                    st.subheader(f"👤 {name}")
+                    if comp_item == "変化量":
+                        fig, ax = plt.subplots(figsize=(6, 6))
+                        for pt in PITCH_LIST:
+                            sub = d[d['TaggedPitchType']==pt]
+                            if not sub.empty: ax.scatter(sub['HorzBreak'], sub['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
+                        ax.axvline(0); ax.axhline(0); ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_box_aspect(1); st.pyplot(fig)
+                    elif comp_item == "リリース位置":
+                        fig, ax = plt.subplots(figsize=(6, 6))
+                        for pt in PITCH_LIST:
+                            sub = d[d['TaggedPitchType']==pt]
+                            if not sub.empty: ax.scatter(sub['RelSide'], sub['RelHeight'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
+                        ax.set_xlim(-150,150); ax.set_ylim(0,250); ax.set_box_aspect(1); st.pyplot(fig)
+                    elif comp_item == "球速分布":
+                        st.plotly_chart(px.box(d, x='TaggedPitchType', y='RelSpeed', color='TaggedPitchType', color_discrete_map=PITCH_COLORS), use_container_width=True)
+                    display_full_pro_table(d)
