@@ -28,10 +28,8 @@ def check_password():
 if check_password():
     st.set_page_config(layout="wide", page_title="野球部データ分析ツール")
 
-    # 基本設定
+    # --- 基本設定 ---
     PITCH_LIST = ['Fastball', 'Slider', 'Cutter', 'Curveball', 'Splitter', 'ChangeUp', 'Sinker', 'TwoSeamFastBall']
-    
-    # 色の設定
     PITCH_COLORS = {
         'Fastball': '#FF4B4B', 'Slider': '#1E90FF', 'Cutter': '#FF1493', 
         'Curveball': '#32CD32', 'Splitter': '#40E0D0', 'ChangeUp': '#8A2BE2', 
@@ -46,25 +44,44 @@ if check_password():
         if pitch_type == 'Splitter': return 's'         # ■
         if pitch_type in ['ChangeUp', 'Sinker']: return 'v' # ▼
         if pitch_type == 'Curveball': return '^'        # ▲
-        if pitch_type == 'TwoSeamFastBall': return 'p'  # ⬠ (pentagon)
+        if pitch_type == 'TwoSeamFastBall': return 'p'  # ⬠
         return 'o'
 
+    # --- 共通：集計表作成関数（インデックス非表示版） ---
     def display_full_summary_table(df):
         if df.empty: return
         total_pitches = len(df)
         res = df.groupby('TaggedPitchType', observed=True).agg(
-            count=('Pitcher', 'count'), 平均球速=('RelSpeed', 'mean'), 最高球速=('RelSpeed', 'max'),
-            回転数=('SpinRate', 'mean'), 縦変化=('InducedVertBreak', 'mean'), 横変化=('HorzBreak', 'mean'),
-            アングル縦=('VertRelAngle', 'mean'), アングル横=('HorzRelAngle', 'mean')
+            count=('Pitcher', 'count'),
+            平均球速=('RelSpeed', 'mean'),
+            最高球速=('RelSpeed', 'max'),
+            回転数=('SpinRate', 'mean'),
+            縦変化=('InducedVertBreak', 'mean'),
+            横変化=('HorzBreak', 'mean'),
+            アングル縦=('VertRelAngle', 'mean'),
+            アングル横=('HorzRelAngle', 'mean')
         ).reset_index()
+        
         res['投球割合(球数)'] = res['count'].apply(lambda x: f"{x/total_pitches*100:.1f}% ({x})")
         res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
         res = res.sort_values('TaggedPitchType').dropna(subset=['TaggedPitchType'])
+        
         res = res[['TaggedPitchType', '投球割合(球数)', '平均球速', '最高球速', '回転数', '縦変化', '横変化', 'アングル縦', 'アングル横']]
-        res = res.rename(columns={'TaggedPitchType': '球種', '平均球速': '平均(km/h)', '最高球速': '最高(km/h)', '縦変化': '縦変化(cm)', '横変化': '横変化(cm)', 'アングル縦': 'リリースアングル(縦)', 'アングル横': 'リリースアングル(横)'})
-        st.dataframe(res.style.format(precision=1, subset=['平均(km/h)', '最高(km/h)', '回転数', '縦変化(cm)', '横変化(cm)', 'リリースアングル(縦)', 'リリースアングル(横)']), use_container_width=True)
+        res = res.rename(columns={
+            'TaggedPitchType': '球種',
+            '平均球速': '平均(km/h)', '最高球速': '最高(km/h)',
+            '縦変化': '縦変化(cm)', '横変化': '横変化(cm)',
+            'アングル縦': 'リリースアングル(縦)', 'アングル横': 'リリースアングル(横)'
+        })
+        
+        # hide_index=True で左側の数字を消す
+        st.dataframe(
+            res.style.format(precision=1, subset=['平均(km/h)', '最高(km/h)', '回転数', '縦変化(cm)', '横変化(cm)', 'リリースアングル(縦)', 'リリースアングル(横)']), 
+            use_container_width=True,
+            hide_index=True
+        )
 
-    # データ読み込み
+    # --- データ読み込み ---
     DATA_DIR = "data"
     all_data = []
     if os.path.exists(DATA_DIR):
@@ -84,6 +101,7 @@ if check_password():
         full_df['TaggedPitchType'] = full_df['TaggedPitchType'].replace('FourSeamFastBall', 'Fastball')
         full_df['Date_str'] = pd.to_datetime(full_df['Date'], errors='coerce').dt.strftime('%Y-%m-%d')
 
+        # --- サイドバー：メニュー ---
         st.sidebar.title("📊 MENU")
         mode = st.sidebar.radio("モード選択", ["総合レポート", "1人集中分析", "2人比較"])
         st.sidebar.markdown("---")
@@ -100,7 +118,7 @@ if check_password():
         if s_files: target_df1 = target_df1[target_df1['SeasonFile'].isin(s_files)]
         if s_dates: target_df1 = target_df1[target_df1['Date_str'].isin(s_dates)]
 
-        # --- 共通グラフ関数（凡例・マーカー対応） ---
+        # --- 共通グラフ関数（正方形・タイトル・凡例・マーカー） ---
         def get_fig(df, mode_name, title_text, throws):
             fig, ax = plt.subplots(figsize=(6, 5))
             for pt in PITCH_LIST:
@@ -123,10 +141,10 @@ if check_password():
             ax.set_box_aspect(1)
             ax.set_title(title_text, fontsize=12, fontweight='bold')
             ax.grid(True, alpha=0.3)
-            # 凡例をグラフの外側（右側）に配置
             ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0, fontsize=9)
             return fig
 
+        # --- 各モードの表示 ---
         if mode == "総合レポート":
             st.header(f"📋 {p1} 投手：総合レポート")
             c1, c2 = st.columns(2)
@@ -150,14 +168,13 @@ if check_password():
                         for pt in PITCH_LIST:
                             d_p = d_s[d_s['TaggedPitchType'] == pt]
                             if not d_p.empty:
-                                color = PITCH_COLORS.get(pt, '#808080')
-                                marker = get_marker(pt, p1_throws)
-                                ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=color, marker=marker, label=pt, alpha=0.6)
+                                ax.scatter(d_p['PlateLocSide'], d_p['PlateLocHeight'], color=PITCH_COLORS[pt], marker=get_marker(pt, p1_throws), label=pt, alpha=0.6)
                         ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(title, fontweight='bold'); ax.set_box_aspect(1)
                         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
                         st.pyplot(fig)
             else:
                 st.pyplot(get_fig(target_df1, analysis_item, analysis_item, p1_throws))
+            
             st.subheader("📊 球種別スタッツ")
             display_full_summary_table(target_df1)
 
