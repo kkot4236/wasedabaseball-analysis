@@ -18,9 +18,7 @@ def check_password():
             st.session_state["password_correct"] = False
     st.title("🔐 早稲田大学野球部 データ分析 Pro+")
     st.text_input("パスワードを入力してください", type="password", on_change=password_entered, key="password_input")
-    if st.session_state["password_correct"] == False:
-        st.error("😕 パスワードが違います。")
-    return False
+    return st.session_state["password_correct"]
 
 if check_password():
     st.set_page_config(layout="wide", page_title="野球部データ分析 Pro+")
@@ -83,7 +81,7 @@ if check_password():
             for f in [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')]:
                 try:
                     temp = pd.read_csv(os.path.join(DATA_DIR, f))
-                    num_cols = ['RelSpeed', 'InducedVertBreak', 'HorzBreak', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle', 'HorzRelAngle', 'SpinRate', 'PlateLocSide', 'PlateLocHeight', 'ExitSpeed']
+                    num_cols = ['RelSpeed', 'InducedVertBreak', 'HorzBreak', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle', 'HorzRelAngle', 'SpinRate', 'PlateLocSide', 'PlateLocHeight', 'ExitSpeed', 'Balls', 'Strikes']
                     for c in num_cols:
                         if c in temp.columns: temp[c] = pd.to_numeric(temp[c], errors='coerce')
                     for c in ['RelHeight', 'RelSide', 'Extension', 'PlateLocSide', 'PlateLocHeight']:
@@ -99,34 +97,29 @@ if check_password():
         df_full['TaggedPitchType'] = df_full['TaggedPitchType'].replace('FourSeamFastBall', 'Fastball').fillna('Unknown').astype(str)
         df_full['Date_str'] = pd.to_datetime(df_full['Date'], errors='coerce').dt.strftime('%Y-%m-%d')
         
-        # モード選択をサイドバーの最上部に配置
-        st.sidebar.title("🎮 メインメニュー")
-        mode_choice = st.sidebar.radio("分析モード切り替え", ["投手分析モード", "打者分析モード"])
-        st.sidebar.markdown("---")
+        # --- メインエリアのタブ切り替え ---
+        tab_p, tab_b = st.tabs(["🔥 投手分析モード", "⚾ 打者分析モード"])
 
-        if mode_choice == "投手分析モード":
-            # ==========================================
-            # 投手専用サイドバー
-            # ==========================================
-            st.sidebar.subheader("🔥 投手メニュー")
-            p_mode = st.sidebar.radio("レポート形式", ["総合レポート", "1人集中分析", "2人比較"])
-            
+        # ==========================================
+        # 投手分析モード
+        # ==========================================
+        with tab_p:
+            st.sidebar.title("🔥 投手メニュー")
+            p_mode = st.sidebar.radio("レポート形式", ["総合レポート", "1人集中分析", "2人比較"], key="p_report_mode")
             p_col = 'Pitcher' if 'Pitcher' in df_full.columns else 'Pitcher Name'
             p_list = sorted([str(p) for p in df_full[p_col].unique() if pd.notna(p)])
-            sel_p = st.sidebar.selectbox("投手を選択", p_list)
+            sel_p = st.sidebar.selectbox("投手を選択", p_list, key="p_sel")
             
             p_full = df_full[df_full[p_col].astype(str) == sel_p].copy()
-            s_files = st.sidebar.multiselect("ファイル絞り込み", sorted(p_full['SeasonFile'].unique()))
-            s_dates = st.sidebar.multiselect("日付絞り込み", sorted(p_full['Date_str'].dropna().unique(), reverse=True))
+            s_files_p = st.sidebar.multiselect("ファイル絞り込み", sorted(p_full['SeasonFile'].unique()), key="p_files")
+            s_dates_p = st.sidebar.multiselect("日付絞り込み", sorted(p_full['Date_str'].dropna().unique(), reverse=True), key="p_dates")
             
             target_p_df = p_full.copy()
-            if s_files: target_p_df = target_p_df[target_p_df['SeasonFile'].isin(s_files)]
-            if s_dates: target_p_df = target_p_df[target_p_df['Date_str'].isin(s_dates)]
+            if s_files_p: target_p_df = target_p_df[target_p_df['SeasonFile'].isin(s_files_p)]
+            if s_dates_p: target_p_df = target_p_df[target_p_df['Date_str'].isin(s_dates_p)]
             p_throws = target_p_df['PitcherThrows'].iloc[0] if not target_p_df.empty and 'PitcherThrows' in target_p_df.columns else 'Right'
 
-            # --- 投手メイン画面 ---
-            st.header(f"📋 {sel_p} 投手：{p_mode}")
-            
+            st.header(f"📋 {sel_p} 投手：分析")
             if p_mode == "総合レポート":
                 c1, c2 = st.columns(2)
                 with c1:
@@ -144,7 +137,7 @@ if check_password():
                 display_full_pro_table(target_p_df)
 
             elif p_mode == "1人集中分析":
-                p_item = st.sidebar.radio("分析項目", ["変化量詳細", "到達位置", "3Dリリース", "カウント別"])
+                p_item = st.sidebar.radio("詳細分析項目", ["変化量詳細", "到達位置", "3Dリリース", "カウント別"], key="p_detail_item")
                 if p_item == "変化量詳細":
                     fig, ax = plt.subplots(figsize=(6, 6))
                     for pt in target_p_df['TaggedPitchType'].unique():
@@ -165,25 +158,24 @@ if check_password():
                     plot_df = target_p_df.dropna(subset=['RelSide', 'Extension', 'RelHeight'])
                     st.plotly_chart(px.scatter_3d(plot_df, x='RelSide', y='Extension', z='RelHeight', color='TaggedPitchType', color_discrete_map=PITCH_COLORS), use_container_width=True)
                 elif p_item == "カウント別":
-                    target_p_df['Count'] = target_p_df['Balls'].fillna(0).astype(int).astype(str) + "-" + target_df1['Strikes'].fillna(0).astype(int).astype(str)
+                    target_p_df['Count'] = target_p_df['Balls'].fillna(0).astype(int).astype(str) + "-" + target_p_df['Strikes'].fillna(0).astype(int).astype(str)
                     count_data = target_p_df.groupby(['Count', 'TaggedPitchType'], observed=True).size().unstack(fill_value=0)
                     st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
                 display_full_pro_table(target_p_df)
 
-        else:
-            # ==========================================
-            # 打者専用サイドバー
-            # ==========================================
-            st.sidebar.subheader("⚾ 打者メニュー")
+        # ==========================================
+        # 打者分析モード
+        # ==========================================
+        with tab_b:
+            st.sidebar.title("⚾ 打者メニュー")
             b_col = 'Batter Name' if 'Batter Name' in df_full.columns else 'Batter'
             b_list = sorted([str(b) for b in df_full[b_col].unique() if pd.notna(b)])
-            sel_b = st.sidebar.selectbox("打者を選択", b_list)
-            view_mode = st.sidebar.radio("表示視点", ["投手目線", "捕手目線"])
+            sel_b = st.sidebar.selectbox("打者を選択", b_list, key="b_sel")
+            view_mode = st.sidebar.radio("表示視点", ["投手目線", "捕手目線"], key="b_view_mode")
             
             b_full = df_full[df_full[b_col] == sel_b].copy()
+            st.header(f"⚾ {sel_b} 打撃分析：ヒートマップ")
             
-            # --- 打者メイン画面 ---
-            st.header(f"⚾ {sel_b} 打者分析：ヒートマップ")
             if not b_full.empty:
                 b_full['PlateLocSide_Plot'] = b_full['PlateLocSide'] * (-1 if view_mode == "捕手目線" else 1)
                 b_hand = b_full['BatterSide'].mode()[0] if 'BatterSide' in b_full.columns and not b_full['BatterSide'].dropna().empty else 'Right'
