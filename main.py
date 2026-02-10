@@ -39,15 +39,26 @@ if check_password():
         if pitch_type == 'Curveball': return '^'
         return 'o'
 
+    # 【重要】線画描画ロジックの修正版
     def draw_stylish_batter(ax, batter_side='Right', view_mode="投手目線"):
+        # 視点と打席による位置計算
         if view_mode == "投手目線":
-            x_offset, flip = (50, -1) if batter_side == 'Right' else (-50, 1)
+            x_offset = 55 if batter_side == 'Right' else -55
+            flip = -1 if batter_side == 'Right' else 1
         else:
-            x_offset, flip = (-50, 1) if batter_side == 'Right' else (50, -1)
-        color, alpha = '#333333', 0.12
-        ax.add_patch(plt.Circle((x_offset, 130), 5, color=color, alpha=alpha, zorder=0))
-        ax.add_patch(plt.Polygon(np.array([[x_offset-8, 80], [x_offset+8, 80], [x_offset+12, 125], [x_offset-12, 125]]), color=color, alpha=alpha))
-        ax.add_patch(plt.Polygon(np.array([[x_offset+(10*flip), 115], [x_offset+(40*flip), 155], [x_offset+(43*flip), 152], [x_offset+(13*flip), 112]]), color=color, alpha=0.18))
+            x_offset = -55 if batter_side == 'Right' else 55
+            flip = 1 if batter_side == 'Right' else -1
+            
+        color, alpha = '#333333', 0.15
+        # 頭
+        ax.add_patch(plt.Circle((x_offset, 140), 6, color=color, alpha=alpha, zorder=1))
+        # 胴体
+        ax.add_patch(plt.Polygon(np.array([[x_offset-12, 85], [x_offset+12, 85], [x_offset+15, 135], [x_offset-15, 135]]), color=color, alpha=alpha, zorder=1))
+        # 足（左・右）
+        ax.add_patch(plt.Polygon(np.array([[x_offset-10, 85], [x_offset-2, 85], [x_offset-15, 20], [x_offset-25, 20]]), color=color, alpha=alpha, zorder=1))
+        ax.add_patch(plt.Polygon(np.array([[x_offset+2, 85], [x_offset+10, 85], [x_offset+25, 20], [x_offset+15, 20]]), color=color, alpha=alpha, zorder=1))
+        # バット（構え）
+        ax.add_patch(plt.Polygon(np.array([[x_offset+(15*flip), 125], [x_offset+(45*flip), 170], [x_offset+(48*flip), 167], [x_offset+(18*flip), 122]]), color=color, alpha=0.25, zorder=1))
 
     def display_full_pro_table(df):
         if df.empty: return
@@ -100,7 +111,7 @@ if check_password():
 
         # --- 5. メインロジック ---
         if mode == "🔥 投手分析":
-            # --- 投手サイドバー：全項目復元 ---
+            # --- 投手サイドバー ---
             st.sidebar.title("🔥 PITCHER MENU")
             p_list = sorted([str(p) for p in df_full[p_col].unique() if pd.notna(p)])
             sel_p = st.sidebar.selectbox("投手を選択", p_list, key="p_sel")
@@ -115,7 +126,6 @@ if check_password():
             if s_dates: target_p_df = target_p_df[target_p_df['Date_str'].isin(s_dates)]
             p_throws = target_p_df['PitcherThrows'].iloc[0] if not target_p_df.empty and 'PitcherThrows' in target_p_df.columns else 'Right'
 
-            # --- 投手メイン画面 ---
             st.header(f"📊 {sel_p} 投手：分析結果")
             
             if p_mode == "総合レポート":
@@ -135,7 +145,7 @@ if check_password():
                 display_full_pro_table(target_p_df)
 
             elif p_mode == "1人集中分析":
-                p_item = st.sidebar.radio("詳細項目", ["変化量詳細", "到達位置", "3Dリリース", "リリース安定度", "カウント別"], key="p_detail_sel")
+                p_item = st.sidebar.radio("詳細項目", ["変化量詳細", "到達位置", "3Dリリース", "カウント別"], key="p_detail_sel")
                 if p_item == "変化量詳細":
                     fig, ax = plt.subplots(figsize=(6, 6))
                     for pt in target_p_df['TaggedPitchType'].unique():
@@ -171,13 +181,13 @@ if check_password():
             st.header(f"🎯 {sel_b} 打者：打球速度ヒートマップ")
             
             if not b_full.empty:
+                # 視点による座標反転
                 b_full['PlateLocSide_Plot'] = b_full['PlateLocSide'] * (-1 if view_mode == "捕手目線" else 1)
                 b_hand = b_full['BatterSide'].mode()[0] if not b_full['BatterSide'].dropna().empty else 'Right'
                 
                 x_edges = [-36.5, -21.5, -7.17, 7.17, 21.5, 36.5]
                 y_edges = [30.0, 45.0, 65.0, 85.0, 105.0, 120.0]
-                # 130km/h台を薄くするためのレンジ調整
-                V_MIN, V_MAX = 100, 165
+                V_MIN, V_MAX = 100, 165 # 130km/h台を薄くするためのレンジ
 
                 fig_h, axes_h = plt.subplots(1, 3, figsize=(20, 8), facecolor='white')
                 filters_h = [b_full, b_full[b_full['PitcherThrows'] == 'Right'], b_full[b_full['PitcherThrows'] == 'Left']]
@@ -185,7 +195,9 @@ if check_password():
 
                 for i, ax in enumerate(axes_h):
                     subset_h = filters_h[i]
+                    # 打者の線画を描画
                     draw_stylish_batter(ax, b_hand, view_mode)
+                    
                     for r in range(5):
                         for c in range(5):
                             x_min, x_max = x_edges[c], x_edges[c+1]
@@ -197,10 +209,12 @@ if check_password():
                                 if pd.notna(avg_v):
                                     norm = (avg_v - V_MIN) / (V_MAX - V_MIN)
                                     color = plt.cm.Reds(np.clip(norm, 0, 1))
-                                    ax.add_patch(plt.Rectangle((x_min, y_min), x_max-x_min, y_max-y_min, color=color, alpha=0.9, ec='white', lw=0.5))
-                                    ax.text((x_min + x_max)/2, (y_min + y_max)/2, f"{avg_v:.1f}\n$n$={len(zone_data)}", ha='center', va='center', fontweight='bold', fontsize=8, color='white' if norm > 0.7 else 'black')
-                    ax.add_patch(plt.Rectangle((-21.5, 45.0), 43.0, 60.0, fill=False, edgecolor='black', lw=2))
-                    ax.set_xlim(-80, 80); ax.set_ylim(10, 160); ax.set_aspect('equal'); ax.axis('off'); ax.set_title(titles_h[i])
+                                    ax.add_patch(plt.Rectangle((x_min, y_min), x_max-x_min, y_max-y_min, color=color, alpha=0.9, ec='white', lw=0.5, zorder=2))
+                                    ax.text((x_min + x_max)/2, (y_min + y_max)/2, f"{avg_v:.1f}\n$n$={len(zone_data)}", ha='center', va='center', fontweight='bold', fontsize=8, color='white' if norm > 0.7 else 'black', zorder=3)
+                    
+                    # ストライクゾーン枠
+                    ax.add_patch(plt.Rectangle((-21.5, 45.0), 43.0, 60.0, fill=False, edgecolor='black', lw=2, zorder=4))
+                    ax.set_xlim(-90, 90); ax.set_ylim(10, 180); ax.set_aspect('equal'); ax.axis('off'); ax.set_title(titles_h[i])
                 st.pyplot(fig_h)
 
     else:
