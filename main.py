@@ -5,8 +5,9 @@ import japanize_matplotlib
 import os
 import plotly.express as px
 import numpy as np
+import matplotlib.cm as cm
 
-# --- 1. パスワード保護 ---
+# --- 1. パスワード保護 (wbc1901) ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = None
@@ -90,8 +91,6 @@ if check_password():
     if df_full is not None:
         p_col = 'Pitcher' if 'Pitcher' in df_full.columns else 'Pitcher Name'
         b_col = 'Batter Name' if 'Batter Name' in df_full.columns else 'Batter'
-        
-        # 名前リスト作成時のエラー対策（欠損値除去と文字列変換）
         p_list = sorted([str(p) for p in df_full[p_col].dropna().unique()])
         b_list = sorted([str(b) for b in df_full[b_col].dropna().unique()])
 
@@ -139,7 +138,7 @@ if check_password():
                             ax.set_xlim(-100,100); ax.set_ylim(0,200); ax.set_title(f"対 {side}打者"); st.pyplot(fig)
                 display_full_pro_table(target_p_df)
 
-        # --- 5. 打者分析 ---
+        # --- 5. 打者分析 (高度レイアウト修正版) ---
         elif mode == "⚾ 打者分析":
             st.sidebar.title("⚾ BATTER MENU")
             sel_b = st.sidebar.selectbox("打者を選択", b_list)
@@ -152,12 +151,16 @@ if check_password():
             if not b_full.empty:
                 b_full['PlateLocSide_Plot'] = b_full['PlateLocSide'] * (-1 if view_mode == "捕手目線" else 1)
                 b_hand = b_full['BatterSide'].mode()[0] if not b_full['BatterSide'].dropna().empty else 'Right'
+                
+                # 速度グラデーション用の範囲設定 (イメージ図の96km~192km付近に合わせる)
+                v_min_speed, v_max_speed = 90, 170 
+
                 if analysis_target == "打球速度": target_col, v_min, v_max, cmap, unit = 'ExitSpeed', 100, 165, 'Reds', ""
                 elif analysis_target == "打球角度 (deg)": target_col, v_min, v_max, cmap, unit = 'Angle', 0, 45, 'viridis', "°"
                 else: target_col, v_min, v_max, cmap, unit = 'Distance', 30, 110, 'Blues', "m"
 
                 st.subheader("📊 全体傾向 (TOTAL)")
-                col_heat, col_angle = st.columns([1.2, 0.8])
+                col_heat, col_angle = st.columns([1.1, 0.9])
 
                 with col_heat:
                     fig_t, ax_t = plt.subplots(figsize=(7, 6))
@@ -179,25 +182,58 @@ if check_password():
                     st.pyplot(fig_t)
 
                 with col_angle:
-                    angle_data = b_full.dropna(subset=['Angle'])
+                    # 角度データの処理
+                    angle_data = b_full.dropna(subset=['Angle', 'Distance', 'ExitSpeed'])
                     if not angle_data.empty:
                         bins = np.arange(-30, 80, 10)
-                        counts, _ = np.histogram(angle_data['Angle'], bins=bins)
-                        percentages = (counts / len(angle_data)) * 100
+                        # 各ビンごとの統計量を計算
+                        angle_data['bin'] = pd.cut(angle_data['Angle'], bins=bins)
+                        # ビンごとの平均飛距離、平均打球速度、カウントを算出
+                        bin_stats = angle_data.groupby('bin', observed=True).agg({
+                            'Distance': 'mean',
+                            'ExitSpeed': 'mean',
+                            'Angle': 'count'
+                        }).reset_index()
+                        
+                        total_count = bin_stats['Angle'].sum()
+                        bin_stats['percentage'] = (bin_stats['Angle'] / total_count) * 100
+                        
+                        # グラフ用の設定
                         theta = np.deg2rad(np.arange(-25, 75, 10))
-                        fig_p = plt.figure(figsize=(6, 5))
+                        radii = bin_stats['Distance'].fillna(0).values # 半径は「平均飛距離」
+                        speeds = bin_stats['ExitSpeed'].fillna(0).values # 色は「打球速度」
+                        percents = bin_stats['percentage'].values # ラベルは「出現率」
+
+                        fig_p = plt.figure(figsize=(6, 6))
                         ax_p = fig_p.add_subplot(111, polar=True)
                         ax_p.set_theta_zero_location('E'); ax_p.set_theta_direction(1)
-                        colors = ['#FF8C00' if 10<=b<30 else '#ADD8E6' if b>=30 else '#90EE90' for b in np.arange(-30, 70, 10)]
-                        ax_p.bar(theta, percentages, width=np.deg2rad(10), color=colors, edgecolor='black', alpha=0.8)
-                        ax_p.plot(0, 0, marker='o', markersize=10, color='black', zorder=5)
+
+                        # 速度に応じた色付け (Orangesグラデーション)
+                        speed_cmap = cm.get_cmap('Oranges')
+                        colors = [speed_cmap(np.clip((s - v_min_speed) / (v_max_speed - v_min_speed), 0, 1)) for s in speeds]
+
+                        bars = ax_p.bar(theta, radii, width=np.deg2rad(10), color=colors, edgecolor='black', alpha=0.9, zorder=3)
+                        
+                        ax_p.plot(0, 0, marker='o', markersize=10, color='black', zorder=5) # インパクト点
                         ax_p.set_thetamin(-40); ax_p.set_thetamax(90)
+                        
+                        # 半径（飛距離）のグリッド設定
+                        ax_p.set_rlabel_position(-35)
+                        ax_p.set_yticks([30, 60, 90, 120])
+                        ax_p.set_yticklabels(["30m", "60m", "90m", "120m"], fontsize=7, color="gray")
+                        
                         ax_p.set_xticks(np.deg2rad(np.arange(-30, 81, 20)))
                         ax_p.set_xticklabels([f"{i}°" for i in range(-30, 81, 20)], fontsize=8)
-                        ax_p.set_yticklabels([]); ax_p.set_title("打球角度分布", fontsize=12)
-                        for t, p in zip(theta, percentages):
-                            if p > 2: ax_p.text(t, p + 3, f"{int(p)}%", ha='center', fontsize=8, fontweight='bold')
+                        
+                        ax_p.set_title("角度別 平均飛距離 & 打球速度", fontsize=12, pad=20)
+                        
+                        # 扇の上に「出現率(%)」を表示
+                        for t, r, p in zip(theta, radii, percents):
+                            if p > 0.5: # 0.5%以上のものだけ表示
+                                ax_p.text(t, r + 5, f"{p:.1f}%", ha='center', fontsize=8, fontweight='bold', color='black')
+
                         st.pyplot(fig_p)
+                        st.caption("※扇の長さ＝平均飛距離(m)　色の濃さ＝平均打球速度(km/h)　数値＝出現率(%)")
 
                 st.markdown("---")
                 st.subheader("⚔️ 左右別比較")
