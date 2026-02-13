@@ -88,9 +88,13 @@ if check_password():
     df_full = load_data()
 
     if df_full is not None:
-        p_col, b_col = 'Pitcher', 'Batter Name'
-        if p_col not in df_full.columns: p_col = 'Pitcher Name'
-        if b_col not in df_full.columns: b_col = 'Batter'
+        p_col = 'Pitcher' if 'Pitcher' in df_full.columns else 'Pitcher Name'
+        b_col = 'Batter Name' if 'Batter Name' in df_full.columns else 'Batter'
+        
+        # 名前リスト作成時のエラー対策（欠損値除去と文字列変換）
+        p_list = sorted([str(p) for p in df_full[p_col].dropna().unique()])
+        b_list = sorted([str(b) for b in df_full[b_col].dropna().unique()])
+
         df_full['TaggedPitchType'] = df_full['TaggedPitchType'].replace('FourSeamFastBall', 'Fastball').fillna('Unknown')
         df_full['Date_str'] = pd.to_datetime(df_full['Date'], errors='coerce').dt.strftime('%Y-%m-%d')
 
@@ -99,9 +103,9 @@ if check_password():
         # --- 4. 投手分析 ---
         if mode == "🔥 投手分析":
             st.sidebar.title("🔥 PITCHER MENU")
-            sel_p = st.sidebar.selectbox("投手を選択", sorted(df_full[p_col].unique()))
+            sel_p = st.sidebar.selectbox("投手を選択", p_list)
             p_mode = st.sidebar.radio("レポート形式", ["総合レポート", "詳細分析"])
-            p_full = df_full[df_full[p_col] == sel_p].copy()
+            p_full = df_full[df_full[p_col].astype(str) == sel_p].copy()
             target_p_df = p_full.copy()
             p_throws = target_p_df['PitcherThrows'].iloc[0] if not target_p_df.empty and 'PitcherThrows' in target_p_df.columns else 'Right'
             
@@ -135,14 +139,14 @@ if check_password():
                             ax.set_xlim(-100,100); ax.set_ylim(0,200); ax.set_title(f"対 {side}打者"); st.pyplot(fig)
                 display_full_pro_table(target_p_df)
 
-        # --- 5. 打者分析 (レイアウト修正版) ---
+        # --- 5. 打者分析 ---
         elif mode == "⚾ 打者分析":
             st.sidebar.title("⚾ BATTER MENU")
-            sel_b = st.sidebar.selectbox("打者を選択", sorted(df_full[b_col].unique()))
+            sel_b = st.sidebar.selectbox("打者を選択", b_list)
             analysis_target = st.sidebar.radio("指標選択", ["打球速度", "打球角度 (deg)", "飛距離 (m)"])
             view_mode = st.sidebar.radio("表示視点", ["投手目線", "捕手目線"])
             
-            b_full = df_full[df_full[b_col] == sel_b].copy()
+            b_full = df_full[df_full[b_col].astype(str) == sel_b].copy()
             st.header(f"🎯 {sel_b} 打者：総合分析レポート")
 
             if not b_full.empty:
@@ -152,9 +156,8 @@ if check_password():
                 elif analysis_target == "打球角度 (deg)": target_col, v_min, v_max, cmap, unit = 'Angle', 0, 45, 'viridis', "°"
                 else: target_col, v_min, v_max, cmap, unit = 'Distance', 30, 110, 'Blues', "m"
 
-                # A. TOTALレイアウト（ヒートマップ | 角度分布）
                 st.subheader("📊 全体傾向 (TOTAL)")
-                col_heat, col_angle = st.columns([1.2, 0.8]) # 左を少し広めに
+                col_heat, col_angle = st.columns([1.2, 0.8])
 
                 with col_heat:
                     fig_t, ax_t = plt.subplots(figsize=(7, 6))
@@ -182,7 +185,6 @@ if check_password():
                         counts, _ = np.histogram(angle_data['Angle'], bins=bins)
                         percentages = (counts / len(angle_data)) * 100
                         theta = np.deg2rad(np.arange(-25, 75, 10))
-                        
                         fig_p = plt.figure(figsize=(6, 5))
                         ax_p = fig_p.add_subplot(111, polar=True)
                         ax_p.set_theta_zero_location('E'); ax_p.set_theta_direction(1)
@@ -192,14 +194,12 @@ if check_password():
                         ax_p.set_thetamin(-40); ax_p.set_thetamax(90)
                         ax_p.set_xticks(np.deg2rad(np.arange(-30, 81, 20)))
                         ax_p.set_xticklabels([f"{i}°" for i in range(-30, 81, 20)], fontsize=8)
-                        ax_p.set_yticklabels([])
-                        ax_p.set_title("打球角度分布", fontsize=12)
+                        ax_p.set_yticklabels([]); ax_p.set_title("打球角度分布", fontsize=12)
                         for t, p in zip(theta, percentages):
                             if p > 2: ax_p.text(t, p + 3, f"{int(p)}%", ha='center', fontsize=8, fontweight='bold')
                         st.pyplot(fig_p)
 
                 st.markdown("---")
-                # B. 左右別比較
                 st.subheader("⚔️ 左右別比較")
                 cl, cr = st.columns(2)
                 for side, col in [('Right', cl), ('Left', cr)]:
