@@ -6,7 +6,7 @@ import os
 import plotly.express as px
 import numpy as np
 
-# --- 1. パスワード保護 ---
+# --- 1. パスワード保護 (wbc1901) ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = None
@@ -23,7 +23,7 @@ def check_password():
 if check_password():
     st.set_page_config(layout="wide", page_title="野球部データ分析 Pro+")
 
-    # --- 2. 描画・計算用共通関数 ---
+    # --- 2. 共通設定・描画関数 ---
     PITCH_LIST = ['Fastball', 'Slider', 'Cutter', 'Curveball', 'Splitter', 'ChangeUp', 'Sinker', 'TwoSeamFastBall']
     PITCH_COLORS = {
         'Fastball': '#FF4B4B', 'Slider': '#1E90FF', 'Cutter': '#FF1493', 
@@ -36,7 +36,7 @@ if check_password():
         if pitch_type in ['Slider', 'Cutter']: return '<' if throws == 'Right' else '>'
         if pitch_type == 'Splitter': return 's'
         if pitch_type in ['ChangeUp', 'Sinker']: return 'v'
-        if pitch_type in ['Curveball']: return '^'
+        if pitch_type == 'Curveball': return '^'
         return 'o'
 
     def draw_stylish_batter(ax, batter_side='Right', view_mode="投手目線"):
@@ -84,7 +84,6 @@ if check_password():
                         if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
                     for c in ['RelHeight', 'RelSide', 'Extension', 'PlateLocSide', 'PlateLocHeight']:
                         if c in df.columns: df[c] *= 100
-                    # 飛距離は元からmのため変換なし
                     df['SeasonFile'] = f
                     all_data.append(df)
                 except: pass
@@ -98,9 +97,9 @@ if check_password():
         df_full['TaggedPitchType'] = df_full['TaggedPitchType'].replace('FourSeamFastBall', 'Fastball').fillna('Unknown')
         df_full['Date_str'] = pd.to_datetime(df_full['Date'], errors='coerce').dt.strftime('%Y-%m-%d')
 
-        mode = st.radio("🏠 分析モード", ["🔥 投手分析", "⚾ 打者分析"], horizontal=True, label_visibility="collapsed")
+        mode = st.radio("🏠 モード選択", ["🔥 投手分析", "⚾ 打者分析"], horizontal=True, label_visibility="collapsed")
 
-        # --- 4. 投手分析セクション ---
+        # --- 4. 投手分析 ---
         if mode == "🔥 投手分析":
             st.sidebar.title("🔥 PITCHER MENU")
             p_list = sorted([str(p) for p in df_full[p_col].unique() if pd.notna(p)])
@@ -154,7 +153,7 @@ if check_password():
                     st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
                 display_full_pro_table(target_p_df)
 
-        # --- 5. 打者分析セクション ---
+        # --- 5. 打者分析 ---
         elif mode == "⚾ 打者分析":
             st.sidebar.title("⚾ BATTER MENU")
             b_list = sorted([str(b) for b in df_full[b_col].unique() if pd.notna(b)])
@@ -165,31 +164,41 @@ if check_password():
             b_full = df_full[df_full[b_col] == sel_b].copy()
             st.header(f"🎯 {sel_b} 打者：総合分析")
 
-            # A. 角度分布の扇形グラフ
-            st.subheader("📈 打球角度の分布 (%)")
+            # A. サイドビュー角度分布グラフ (インパクト地点からの横断図)
+            st.subheader("📈 打球角度の傾向 (サイドビュー分布)")
             angle_data = b_full.dropna(subset=['Angle'])
             if not angle_data.empty:
-                bins = np.arange(-20, 70, 10)
+                bins = np.arange(-30, 80, 10)
                 counts, _ = np.histogram(angle_data['Angle'], bins=bins)
                 percentages = (counts / len(angle_data)) * 100
-                theta = np.deg2rad(np.arange(-15, 65, 10)) 
+                theta = np.deg2rad(np.arange(-25, 75, 10))
                 width = np.deg2rad(10)
 
-                fig_p = plt.figure(figsize=(7, 7))
+                fig_p = plt.figure(figsize=(8, 5))
                 ax_p = fig_p.add_subplot(111, polar=True)
-                colors = ['#ff9999' if (10 <= b < 30) else '#99ff99' for b in np.arange(-20, 60, 10)]
-                ax_p.bar(theta, percentages, width=width, color=colors, edgecolor='black', alpha=0.7)
-                ax_p.set_theta_zero_location('N'); ax_p.set_theta_direction(-1)
-                ax_p.set_thetamin(-30); ax_p.set_thetamax(70)
-                ax_p.set_xticks(np.deg2rad(np.arange(-20, 70, 10)))
-                ax_p.set_xticklabels([f"{i}°" for i in range(-20, 70, 10)])
+                ax_p.set_theta_zero_location('E') # 0度を右（水平）に
+                ax_p.set_theta_direction(1)
+                
+                colors = []
+                for b in np.arange(-30, 70, 10):
+                    if 10 <= b < 30: colors.append('#FF8C00') # ライナー
+                    elif b >= 30: colors.append('#ADD8E6')    # フライ
+                    else: colors.append('#90EE90')            # ゴロ
+
+                ax_p.bar(theta, percentages, width=width, color=colors, edgecolor='black', alpha=0.8)
+                ax_p.plot(0, 0, marker='o', markersize=15, color='black', zorder=5) # インパクト点
+                ax_p.set_thetamin(-40); ax_p.set_thetamax(90)
+                ax_p.set_xticks(np.deg2rad(np.arange(-30, 81, 10)))
+                ax_p.set_xticklabels([f"{i}°" for i in range(-30, 81, 10)])
+                ax_p.set_yticklabels([])
                 for t, p in zip(theta, percentages):
-                    if p > 0: ax_p.text(t, p + 3, f"{p:.1f}%", ha='center', fontweight='bold')
+                    if p > 0: ax_p.text(t, p + 2, f"{p:.1f}%", ha='center', fontweight='bold', fontsize=9)
                 st.pyplot(fig_p)
+                st.caption("インパクト点（黒丸）から見た打球の上下角度の分布です。オレンジ色(10°-30°)が理想のライナーゾーンです。")
 
             st.markdown("---")
 
-            # B. コース別ヒートマップ
+            # B. コース別ヒートマップ (TOTAL上段、左右下段)
             if not b_full.empty:
                 b_full['PlateLocSide_Plot'] = b_full['PlateLocSide'] * (-1 if view_mode == "捕手目線" else 1)
                 b_hand = b_full['BatterSide'].mode()[0] if not b_full['BatterSide'].dropna().empty else 'Right'
