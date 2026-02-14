@@ -86,7 +86,7 @@ if check_password():
         mode = st.radio("🏠 分析モード", ["🔥 投手分析", "⚾ 打者分析"], horizontal=True)
 
         # ==========================================
-        # 🔥 投手分析 (初期の要望通り復元)
+        # 🔥 投手分析
         # ==========================================
         if mode == "🔥 投手分析":
             st.sidebar.title("🔥 PITCHER MENU")
@@ -117,7 +117,7 @@ if check_password():
                 p_full['is_whiff'] = p_full['PitchCall'] == 'StrikeSwinging'
                 p_full['is_swing'] = p_full['PitchCall'].isin(['StrikeSwinging', 'FoulBall', 'InPlayOut', 'Single', 'Double', 'Triple', 'HomeRun'])
                 res = p_full.groupby('TaggedPitchType', observed=True).agg({'RelSpeed':'mean', 'SpinRate':'mean', 'InducedVertBreak':'mean', 'HorzBreak':'mean', p_col:'count'}).reset_index()
-                whiff_res = p_full.groupby('TaggedPitchType').apply(lambda x: (x['is_whiff'].sum() / x['is_swing'].sum() * 100) if x['is_swing'].sum() > 0 else 0).reset_index(name='Whiff%')
+                whiff_res = p_full.groupby('TaggedPitchType', observed=True).apply(lambda x: (x['is_whiff'].sum() / x['is_swing'].sum() * 100) if x['is_swing'].sum() > 0 else 0).reset_index(name='Whiff%')
                 res = res.merge(whiff_res, on='TaggedPitchType')
                 res['投球割合'] = res[p_col].apply(lambda x: f"{x/len(p_full)*100:.1f}% ({x}球)")
                 st.dataframe(res.style.format(precision=1), use_container_width=True)
@@ -139,7 +139,7 @@ if check_password():
                             ax.set_xlim(-100,100); ax.set_ylim(0,200); ax.set_title(f"対 {side}打者"); ax.legend(fontsize=7); st.pyplot(fig)
 
         # ==========================================
-        # ⚾ 打者分析 (高度機能統合版)
+        # ⚾ 打者分析
         # ==========================================
         elif mode == "⚾ 打者分析":
             st.sidebar.title("⚾ BATTER MENU")
@@ -149,16 +149,18 @@ if check_password():
             st.header(f"🎯 {sel_b} 打者：分析レポート")
 
             if not b_full.empty:
-                # 段組み1: 角度分布 ＆ スプレーチャート
                 c_top1, c_top2 = st.columns(2)
                 with c_top1:
                     st.subheader("📐 角度別飛距離＆頻度")
-                    angle_data = b_full.dropna(subset=['Angle', 'Distance'])
+                    angle_data = b_full.dropna(subset=['Angle', 'Distance']).copy()
                     if not angle_data.empty:
                         bins = np.arange(-30, 81, 10)
                         angle_data['bin'] = pd.cut(angle_data['Angle'], bins=bins)
                         bin_stats = angle_data.groupby('bin', observed=False).agg({'Distance':'mean', 'Angle':'count'}).reset_index()
-                        bin_stats.fillna(0, inplace=True)
+                        
+                        # カテゴリ列以外にfillnaを適用してエラーを回避
+                        bin_stats[['Distance', 'Angle']] = bin_stats[['Distance', 'Angle']].fillna(0)
+                        
                         total_cnt = bin_stats['Angle'].sum()
                         bin_stats['perc'] = (bin_stats['Angle'] / total_cnt * 100) if total_cnt > 0 else 0
                         theta = np.deg2rad(bins[:-1] + 5)
@@ -181,8 +183,7 @@ if check_password():
                         plt.colorbar(sc, label="速度(km/h)"); st.pyplot(fig_s)
 
                 st.markdown("---")
-                # 段組み2: コース別詳細ヒートマップ
-                st.subheader("🎯 コース別詳細（打球速度・角度・飛距離）")
+                st.subheader("🎯 コース別詳細")
                 metric = st.selectbox("表示指標", ["打球速度 (km/h)", "打球角度 (deg)", "飛距離 (m)"])
                 m_map = {"打球速度 (km/h)": ("ExitSpeed", "Reds", 110, 160), "打球角度 (deg)": ("Angle", "Greens", 5, 35), "飛距離 (m)": ("Distance", "Blues", 40, 110)}
                 col_n, cmap_n, vm, vx = m_map[metric]
@@ -193,10 +194,11 @@ if check_password():
                 b_full['px'] = b_full['PlateLocSide'] * (-1 if v_b == "捕手目線" else 1)
                 for i in range(3):
                     for j in range(3):
-                        cell = b_full[(b_full['px'] >= x_edges[j]) & (b_full['px'] < x_edges[j+1]) & (b_full['PlateLocHeight'] >= y_edges[i]) & (b_full['PlateLocHeight'] < y_edges[i+1])]
+                        mask = (b_full['px'] >= x_edges[j]) & (b_full['px'] < x_edges[j+1]) & (b_full['PlateLocHeight'] >= y_edges[i]) & (b_full['PlateLocHeight'] < y_edges[i+1])
+                        cell = b_full[mask]
                         if not cell.empty:
                             val = cell[col_n].mean()
-                            ax_h.add_patch(plt.Rectangle((x_edges[j], y_edges[i]), x_edges[j+1]-x_edges[j], y_edges[i+1]-y_edges[i], color=plt.get_cmap(cmap_n)((val-vm)/(vx-vm)), alpha=0.8, ec='white'))
+                            ax_h.add_patch(plt.Rectangle((x_edges[j], y_edges[i]), x_edges[j+1]-x_edges[j], y_edges[i+1]-y_edges[i], color=plt.get_cmap(cmap_n)((val-vm)/(vx-vm) if vx!=vm else 0.5), alpha=0.8, ec='white'))
                             ax_h.text((x_edges[j]+x_edges[j+1])/2, (y_edges[i]+y_edges[i+1])/2, f"{val:.1f}\n(n={len(cell)})", ha='center', va='center', fontweight='bold')
                 ax_h.add_patch(plt.Rectangle((-21.5, 45), 43, 60, fill=False, lw=3, ec='black'))
                 ax_h.set_xlim(-80, 80); ax_h.set_ylim(20, 150); ax_h.axis('off'); st.pyplot(fig_h)
