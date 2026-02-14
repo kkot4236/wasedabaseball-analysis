@@ -23,7 +23,7 @@ def check_password():
 if check_password():
     st.set_page_config(layout="wide", page_title="野球部データ分析 Pro+")
 
-    # --- 2. 共通設定・描画関数 ---
+    # --- 2. 共通描画関数 ---
     PITCH_COLORS = {
         'Fastball': '#FF4B4B', 'Slider': '#1E90FF', 'Cutter': '#FF1493', 
         'Curveball': '#32CD32', 'Splitter': '#40E0D0', 'ChangeUp': '#8A2BE2', 
@@ -31,9 +31,9 @@ if check_password():
     }
 
     def draw_strike_zone(ax, side='Right', view="投手目線"):
-        # ストライクゾーン (cm)
+        # ストライクゾーン枠 (cm基準)
         ax.add_patch(plt.Rectangle((-21.5, 45), 43, 60, fill=False, lw=3, ec='black', zorder=5))
-        # 打者シルエット
+        # 打者シルエットの位置計算
         x_off = 60 if (view == "投手目線" and side == 'Right') or (view == "捕手目線" and side == 'Left') else -60
         ax.add_patch(plt.Circle((x_off, 140), 8, color='#333333', alpha=0.15))
         ax.add_patch(plt.Polygon(np.array([[x_off-15, 80], [x_off+15, 80], [x_off+18, 135], [x_off-18, 135]]), color='#333333', alpha=0.15))
@@ -48,16 +48,20 @@ if check_password():
     @st.cache_data
     def load_csv(file_path):
         df = pd.read_csv(file_path)
-        numeric_cols = ['PlateLocSide', 'PlateLocHeight', 'HorzBreak', 'InducedVertBreak', 'RelSpeed', 'SpinRate', 'ExitSpeed', 'Angle', 'Distance', 'Bearing']
-        for c in numeric_cols:
-            if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
-        # 単位変換 ft -> cm (Trackman基準)
+        # 数値への強制変換
+        cols = ['PlateLocSide', 'PlateLocHeight', 'HorzBreak', 'InducedVertBreak', 'RelSpeed', 'SpinRate', 'ExitSpeed', 'Angle', 'Distance', 'Bearing']
+        for c in cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors='coerce')
+        # 単位変換 ft -> cm (Trackman)
+        # 板の端が21.5cmなので、値が小さい場合はftと判断して変換
         if 'PlateLocSide' in df.columns and df['PlateLocSide'].abs().max() < 10:
-            df['PlateLocSide'] *= 30.48; df['PlateLocHeight'] *= 30.48
+            df['PlateLocSide'] *= 30.48
+            df['PlateLocHeight'] *= 30.48
         return df
 
     # ==========================================
-    # 📝 メインナビゲーション
+    # 📝 メインナビゲーション (サイドバー連動型)
     # ==========================================
     st.sidebar.title("🚀 メインメニュー")
     mode = st.sidebar.radio("分析対象を選択", ["🔥 投手分析", "⚾ 打者分析"])
@@ -71,7 +75,7 @@ if check_password():
         st.sidebar.markdown("---")
         st.sidebar.subheader("🔥 PITCHER SETTINGS")
         if files:
-            sel_file = st.sidebar.selectbox("分析ファイルを選択", files, key="p_file")
+            sel_file = st.sidebar.selectbox("分析ファイルを選択", files, key="p_file_nav")
             df = load_csv(os.path.join(DATA_DIR, sel_file))
             p_col = 'Pitcher' if 'Pitcher' in df.columns else 'Pitcher Name'
             p_list = sorted(df[p_col].dropna().unique())
@@ -91,7 +95,7 @@ if check_password():
                     ax.set_xlim(-80, 80); ax.set_ylim(-80, 80); ax.set_title("変化量(cm)"); ax.legend(); st.pyplot(fig)
                 with c2:
                     st.subheader("📋 球種別スタッツ")
-                    summary = p_df.groupby('TaggedPitchType').agg({'RelSpeed':'mean','SpinRate':'mean',p_col:'count'}).reset_index()
+                    summary = p_df.groupby('TaggedPitchType').agg({'RelSpeed':'mean','SpinRate':'mean',p_col:'count'}).rename(columns={p_col:'球数'}).reset_index()
                     st.dataframe(summary.style.format(precision=1), use_container_width=True)
 
             elif p_sub == "詳細分析（左右別）":
@@ -110,18 +114,17 @@ if check_password():
                         ax.set_xlim(-100, 100); ax.set_ylim(0, 200); ax.set_title(f"対 {side}打者"); ax.legend(); st.pyplot(fig)
 
             elif p_sub == "比較分析":
-                st.header("⚖️ 比較分析")
-                sel_p2 = st.sidebar.selectbox("比較相手を選択", p_list)
+                st.header("⚖️ 投手比較")
+                sel_p2 = st.sidebar.selectbox("比較相手を選択", [p for p in p_list if p != sel_p])
                 p2_df = df[df[p_col] == sel_p2].copy()
-                st.write(f"{sel_p} (左) vs {sel_p2} (右)")
-                c1, c2 = st.columns(2)
-                for p_name, data, col in [(sel_p, p_df, c1), (sel_p2, p2_df, c2)]:
-                    with col:
+                col1, col2 = st.columns(2)
+                for name, data, c in [(sel_p, p_df, col1), (sel_p2, p2_df, col2)]:
+                    with c:
                         fig, ax = plt.subplots(); ax.axvline(0, color='k'); ax.axhline(0, color='k')
                         for pt in data['TaggedPitchType'].unique():
                             d = data[data['TaggedPitchType']==pt]
                             ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.5)
-                        ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_title(p_name); st.pyplot(fig)
+                        ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_title(name); st.pyplot(fig)
 
     # ==========================================
     # ⚾ 打者分析セクション
@@ -130,61 +133,77 @@ if check_password():
         st.sidebar.markdown("---")
         st.sidebar.subheader("⚾ BATTER SETTINGS")
         if files:
-            sel_file = st.sidebar.selectbox("ファイルを選択", files, key="b_file")
-            df = load_csv(os.path.join(DATA_DIR, sel_file))
-            b_col = 'Batter' if 'Batter' in df.columns else 'Batter Name'
-            b_list = sorted(df[b_col].dropna().unique())
+            sel_file = st.sidebar.selectbox("分析ファイルを選択", files, key="b_file_nav")
+            df_b = load_csv(os.path.join(DATA_DIR, sel_file))
+            b_col = 'Batter' if 'Batter' in df_b.columns else 'Batter Name'
+            b_list = sorted(df_b[b_col].dropna().unique())
             sel_b = st.sidebar.selectbox("打者を選択", b_list)
-            v_b = st.sidebar.radio("視点", ["投手目線", "捕手目線"])
-            target_side = st.sidebar.radio("投手左右", ["すべて", "対右投手", "対左投手"])
-            b_df = df[df[b_col] == sel_b].copy()
-            if target_side == "対右投手": b_df = b_df[b_df['PitcherThrows'] == 'Right']
-            elif target_side == "対左投手": b_df = b_df[b_df['PitcherThrows'] == 'Left']
+            v_b = st.sidebar.radio("表示視点", ["投手目線", "捕手目線"], key="v_b_nav")
+            t_side = st.sidebar.radio("投手左右", ["すべて", "対右投手", "対左投手"])
+            
+            b_df = df_b[df_b[b_col] == sel_b].copy()
+            if t_side == "対右投手": b_df = b_df[b_df['PitcherThrows'] == 'Right']
+            elif t_side == "対左投手": b_df = b_df[b_df['PitcherThrows'] == 'Left']
 
-            st.header(f"🎯 {sel_b} : 打撃分析")
+            st.header(f"🎯 {sel_b} : {t_side} 分析")
+            
+            # --- 上段: 角度分布 & スプレーチャート ---
             c1, c2 = st.columns(2)
             with c1:
                 st.subheader("📐 角度別飛距離＆頻度")
-                angle_data = b_df.dropna(subset=['Angle', 'Distance']).copy()
-                if not angle_data.empty:
+                ang_d = b_df.dropna(subset=['Angle', 'Distance'])
+                if not ang_d.empty:
                     bins = np.arange(-30, 81, 10)
-                    angle_data['bin'] = pd.cut(angle_data['Angle'], bins=bins)
-                    bin_stats = angle_data.groupby('bin', observed=False).agg({'Distance':'mean', 'Angle':'count'}).reset_index()
-                    bin_stats[['Distance', 'Angle']] = bin_stats[['Distance', 'Angle']].fillna(0)
-                    total_cnt = bin_stats['Angle'].sum()
-                    bin_stats['perc'] = (bin_stats['Angle'] / total_cnt * 100) if total_cnt > 0 else 0
+                    ang_d['bin'] = pd.cut(ang_d['Angle'], bins=bins)
+                    stats = ang_d.groupby('bin', observed=False).agg({'Distance':'mean', 'Angle':'count'}).reset_index()
                     theta = np.deg2rad(bins[:-1] + 5)
                     fig_p = plt.figure(figsize=(6, 6)); ax_p = fig_p.add_subplot(111, polar=True)
                     ax_p.set_theta_zero_location('E'); ax_p.set_thetamin(-40); ax_p.set_thetamax(90)
-                    cmap = cm.get_cmap('Oranges')
-                    max_p = max(bin_stats['perc']) if max(bin_stats['perc']) > 0 else 1
-                    ax_p.bar(theta, bin_stats['Distance'], width=np.deg2rad(10), color=[cmap(p/max_p) for p in bin_stats['perc']], edgecolor='black')
+                    ax_p.bar(theta, stats['Distance'].fillna(0), width=np.deg2rad(10), color='orange', edgecolor='black', alpha=0.7)
                     st.pyplot(fig_p)
 
             with c2:
                 st.subheader("🏹 打球方向分布")
-                spray_df = b_df.dropna(subset=['Bearing', 'Distance'])
-                if not spray_df.empty:
+                sp_d = b_df.dropna(subset=['Bearing', 'Distance'])
+                if not sp_d.empty:
                     fig_s, ax_s = plt.subplots(figsize=(6, 6)); draw_field(ax_s)
-                    rad = np.deg2rad(spray_df['Bearing'])
-                    ax_s.scatter(spray_df['Distance']*np.sin(rad), spray_df['Distance']*np.cos(rad), c='red', alpha=0.6, edgecolors='k')
+                    rad = np.deg2rad(sp_d['Bearing'])
+                    ax_s.scatter(sp_d['Distance']*np.sin(rad), sp_d['Distance']*np.cos(rad), c='blue', alpha=0.6, edgecolors='k')
                     st.pyplot(fig_s)
 
             st.markdown("---")
-            st.subheader("🎯 コース別詳細ヒートマップ")
-            metric = st.selectbox("指標選択", ["ExitSpeed", "Angle", "Distance"])
-            m_map = {"ExitSpeed": ("Reds", 110, 160), "Angle": ("YlGn", 0, 40), "Distance": ("Blues", 40, 110)}
-            cmap_n, vmin, vmax = m_map[metric]
-            fig_h, ax_h = plt.subplots(figsize=(8, 8)); draw_strike_zone(ax_h, 'Right', v_b)
-            x_edges = np.linspace(-21.5, 21.5, 4); y_edges = np.linspace(45, 105, 4)
+            # --- 下段: コース別詳細ヒートマップ (修正版) ---
+            st.subheader("🎯 コース別打球速度 (km/h)")
+            
+            # 指標の選択
+            metric = "ExitSpeed" 
+            fig_h, ax_h = plt.subplots(figsize=(8, 8))
+            draw_strike_zone(ax_h, 'Right', v_b)
+            
+            # グリッド定義 (左右は-21.5~21.5, 高さは45~105)
+            x_edges = np.linspace(-21.5, 21.5, 4)
+            y_edges = np.linspace(45, 105, 4)
+            
+            # 視点による座標反転
             b_df['px'] = b_df['PlateLocSide'] * (-1 if v_b == "捕手目線" else 1)
-            for i in range(3):
-                for j in range(3):
-                    mask = (b_df['px'] >= x_edges[j]) & (b_df['px'] < x_edges[j+1]) & (b_df['PlateLocHeight'] >= y_edges[i]) & (b_df['PlateLocHeight'] < y_edges[i+1])
+            
+            for i in range(3): # 高さ
+                for j in range(3): # 横
+                    # セル範囲を少し広めに設定して境界上のデータを拾う
+                    mask = (b_df['px'] >= x_edges[j]-1) & (b_df['px'] < x_edges[j+1]+1) & \
+                           (b_df['PlateLocHeight'] >= y_edges[i]-1) & (b_df['PlateLocHeight'] < y_edges[i+1]+1)
                     cell = b_df[mask].dropna(subset=[metric])
+                    
                     if not cell.empty:
                         val = cell[metric].mean()
-                        color = plt.get_cmap(cmap_n)((val-vmin)/(vmax-vmin) if vmax!=vmin else 0.5)
+                        count = len(cell)
+                        # 色の設定 (100km/h以下は薄く、160km/h以上は濃く)
+                        color = cm.Reds(np.clip((val - 100) / 60, 0.1, 0.9))
                         ax_h.add_patch(plt.Rectangle((x_edges[j], y_edges[i]), x_edges[j+1]-x_edges[j], y_edges[i+1]-y_edges[i], facecolor=color, alpha=0.8, ec='white'))
-                        ax_h.text((x_edges[j]+x_edges[j+1])/2, (y_edges[i]+y_edges[i+1])/2, f"{val:.1f}\n(n={len(cell)})", ha='center', va='center', fontweight='bold')
-            ax_h.set_xlim(-70, 70); ax_h.set_ylim(10, 160); ax_h.axis('off'); st.pyplot(fig_h)
+                        ax_h.text((x_edges[j]+x_edges[j+1])/2, (y_edges[i]+y_edges[i+1])/2, f"{val:.1f}\n(n={count})", ha='center', va='center', fontweight='bold', fontsize=12)
+
+            ax_h.set_xlim(-70, 70); ax_h.set_ylim(20, 160); ax_h.axis('off')
+            st.pyplot(fig_h)
+
+        else:
+            st.warning("dataフォルダにCSVファイルを入れてください。")
