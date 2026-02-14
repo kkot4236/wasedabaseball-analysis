@@ -40,6 +40,7 @@ if check_password():
     def load_csv(file_path):
         try: df = pd.read_csv(file_path, encoding='cp932')
         except: df = pd.read_csv(file_path, encoding='utf-8')
+        # 単位 m から cm へ変換 (*100)
         df['PlateLocSide_cm'] = df['PlateLocSide'] * 100
         df['PlateLocHeight_cm'] = df['PlateLocHeight'] * 100
         return df
@@ -109,57 +110,52 @@ if check_password():
                     ax.set_title(titles[i], fontsize=15, fontweight='bold'); ax.axis('off')
                     col_ax.pyplot(fig)
 
-                # --- B. 扇形角度分布（10度刻み罫線強化版） ---
+                # --- B. 扇形角度分布（10度刻み・罫線強化版） ---
                 st.markdown("---")
-                st.subheader("📐 打球角度分布（10度刻みガイドライン）")
+                st.subheader("📐 打球角度分布（Launch Angle Distribution）")
                 
                 angle_data = target_df['Angle'].dropna()
                 if not angle_data.empty:
-                    # 10度刻みの設定
-                    bins = np.arange(-20, 71, 10) # -20から70まで
+                    bins = np.arange(-20, 71, 10)
                     counts, _ = np.histogram(angle_data, bins=bins)
                     pcts = (counts / len(angle_data)) * 100
                     
-                    fig_polar = plt.figure(figsize=(12, 7))
+                    fig_polar = plt.figure(figsize=(10, 6))
                     ax_polar = fig_polar.add_subplot(111, polar=True)
                     
                     centers = bins[:-1] + 5
                     theta = np.deg2rad(centers)
-                    width = np.deg2rad(9.5) # 隙間をわずかに作る
+                    width = np.deg2rad(10)
                     
-                    bars = ax_polar.bar(theta, pcts, width=width, color='darkred', alpha=0.7, edgecolor='black', zorder=4)
+                    # 棒の描画
+                    bars = ax_polar.bar(theta, pcts, width=width, color='darkred', alpha=0.7, edgecolor='black', zorder=3)
                     
-                    # 扇形表示範囲
+                    # 扇形の表示範囲と0度の位置
                     ax_polar.set_thetamin(-25)
                     ax_polar.set_thetamax(75)
                     ax_polar.set_theta_zero_location('E')
                     
-                    # 【重要】10度刻みの罫線（グリッド）を設定
+                    # 10度刻みの罫線（グリッド）を設定
                     grid_angles = np.arange(-20, 71, 10)
                     ax_polar.set_xticks(np.deg2rad(grid_angles))
                     ax_polar.set_xticklabels([f"{a}°" for a in grid_angles], fontsize=10, fontweight='bold')
                     
-                    # 罫線のスタイル調整
-                    ax_polar.grid(True, axis='x', color='gray', linestyle='-', alpha=0.5, zorder=1)
-                    ax_polar.grid(True, axis='y', color='gray', linestyle='--', alpha=0.3, zorder=1)
+                    # 罫線の表示設定
+                    ax_polar.grid(True, axis='x', color='gray', linestyle='-', alpha=0.4, zorder=1)
+                    ax_polar.grid(True, axis='y', color='gray', linestyle='--', alpha=0.2, zorder=1)
                     
-                    # バレルゾーン（25-35度）の強調
-                    ax_polar.fill_between(np.deg2rad([25, 35]), 0, max(pcts)+10, color='orange', alpha=0.2, zorder=2, label='Barrel')
-                    
-                    # パーセント表示
+                    # 各棒の上に％を表示
                     for t, p in zip(theta, pcts):
                         if p > 0:
-                            ax_polar.text(t, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold', color='black', zorder=10)
+                            ax_polar.text(t, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=9, fontweight='bold', zorder=10)
 
+                    # バレルゾーン(25-35度)のハイライト
+                    ax_polar.fill_between(np.deg2rad([25, 35]), 0, max(pcts)+10, color='orange', alpha=0.15, zorder=2)
+                    
                     st.pyplot(fig_polar)
                 else:
                     st.info("角度データがありません。")
         
         elif mode == "投手分析":
             st.title("📊 投手分析モード")
-            # 投手用コード（既存）をここへ
-                    # 地面(0度)に目立つ線を引く
-                    ax_polar.annotate('', xy=(0, max(pcts)+5), xytext=(0,0),
-                                     arrowprops=dict(arrowstyle='-', color='black', lw=1, ls='--'))
-
-                    st.pyplot(fig_polar)
+            st.info("投手分析のコンテンツをここに実装できます。")
