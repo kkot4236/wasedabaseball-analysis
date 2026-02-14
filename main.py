@@ -25,20 +25,25 @@ if check_password():
 
     # --- 2. 共通描画関数 ---
     def draw_field(ax):
-        # センター0度を基準に、一塁線(45度)と三塁線(-45度)を正確に描画
-        # 数学的には上(90度方向)をセンターとするため、変換を合わせる
-        r_foul = 110 # フェンスまでの距離
-        # 三塁線 (-45度)
+        # 正確なファウルライン描画
+        r_foul = 120 
         ax.plot([0, -r_foul * np.sin(np.deg2rad(45))], [0, r_foul * np.cos(np.deg2rad(45))], color='black', lw=2, zorder=1)
-        # 一塁線 (45度)
         ax.plot([0, r_foul * np.sin(np.deg2rad(45))], [0, r_foul * np.cos(np.deg2rad(45))], color='black', lw=2, zorder=1)
         
-        # 外野フェンス (円弧)
+        # 飛距離の目安 (50m, 100m) の円弧を描画
         theta = np.linspace(np.deg2rad(135), np.deg2rad(45), 100)
-        ax.plot(r_foul * np.cos(theta), r_foul * np.sin(theta), color='black', lw=2, zorder=1)
+        for dist in [50, 100]:
+            ax.plot(dist * np.cos(theta), dist * np.sin(theta), color='gray', lw=0.8, ls='--', alpha=0.5, zorder=1)
+            ax.text(0, dist + 2, f"{dist}m", color='gray', fontsize=8, ha='center', alpha=0.7)
+
+        # 外野フェンス (110m想定)
+        r_fence = 110
+        ax.plot(r_fence * np.cos(theta), r_fence * np.sin(theta), color='black', lw=2.5, zorder=2)
         
-        # 内野っぽさを出すためのダイヤモンド
-        ax.plot([-27.4, 0, 27.4, 0, -27.4], [27.4, 54.8, 27.4, 0, 27.4], color='gray', lw=1, ls='--', alpha=0.5)
+        # 内野ダイヤモンド
+        ax.plot([-27.4/np.sqrt(2)*2, 0, 27.4/np.sqrt(2)*2, 0, -27.4/np.sqrt(2)*2], 
+                [27.4/np.sqrt(2), 27.4*np.sqrt(2), 27.4/np.sqrt(2), 0, 27.4/np.sqrt(2)], 
+                color='green', lw=1, ls='-', alpha=0.3)
         
         ax.set_aspect('equal')
         ax.axis('off')
@@ -155,22 +160,26 @@ if check_password():
                         fig_s, ax_s = plt.subplots(figsize=(6, 6))
                         draw_field(ax_s)
                         
-                        hits = target_df[target_df[res_col].isin(hit_k)]
+                        # カテゴリ分け
+                        hr = target_df[target_df[res_col] == 'HomeRun']
+                        hits = target_df[target_df[res_col].isin(['Single', 'Double', 'Triple'])]
                         outs = target_df[~target_df[res_col].isin(hit_k)]
                         
-                        # トラックマンのBearingは「センター0、一塁側正、三塁側負」
-                        # これを散布図(x,y)に変換：x = dist * sin(angle), y = dist * cos(angle)
                         def to_coords(b, d):
                             r = np.deg2rad(b)
                             return d * np.sin(r), d * np.cos(r)
 
                         hx, hy = to_coords(hits['Bearing'], hits['Distance'])
                         ox, oy = to_coords(outs['Bearing'], outs['Distance'])
+                        hrx, hry = to_coords(hr['Bearing'], hr['Distance'])
                         
+                        # プロット
                         ax_s.scatter(ox, oy, color='gray', alpha=0.4, label='凡打', s=25)
-                        ax_s.scatter(hx, hy, color='red', alpha=0.9, label='安打', s=60, edgecolors='black', zorder=5)
-                        ax_s.legend(loc='upper right')
+                        ax_s.scatter(hx, hy, color='red', alpha=0.8, label='安打(単~三)', s=55, edgecolors='black', zorder=5)
+                        ax_s.scatter(hrx, hry, color='gold', alpha=1.0, label='本塁打', s=120, marker='*', edgecolors='black', zorder=10)
+                        
+                        ax_s.legend(loc='upper right', fontsize=8)
                         ax_s.set_xlim(-100, 100); ax_s.set_ylim(-10, 130)
                         st.pyplot(fig_s)
                     else:
-                        st.info("着弾地点データが不足しています。")
+                        st.info("着弾地点データ(Bearing/Distance)が不足しています。")
