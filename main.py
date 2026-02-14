@@ -17,14 +17,14 @@ def check_password():
             st.session_state["password_correct"] = True
         else:
             st.session_state["password_correct"] = False
-    st.title("🔐 早稲田大学野球部 データ分析ツール Pro+")
+    st.title("東京六大学 Trackman分析データベース")
     st.text_input("パスワードを入力してください", type="password", on_change=password_entered, key="password_input")
     if st.session_state["password_correct"] == False:
-        st.error("😕 パスワードが違います。")
+        st.error("パスワードが違います。")
     return st.session_state["password_correct"]
 
 if check_password():
-    st.set_page_config(layout="wide", page_title="野球部データ分析 Pro+")
+    st.set_page_config(layout="wide", page_title="東京六大学 Trackman分析データベース")
 
     # --- 2. 共通設定・描画関数 ---
     PITCH_LIST = ['Fastball', 'Slider', 'Cutter', 'Curveball', 'Splitter', 'ChangeUp', 'Sinker', 'TwoSeamFastBall']
@@ -117,11 +117,11 @@ if check_password():
         full_df['TaggedPitchType'] = full_df['TaggedPitchType'].replace('FourSeamFastBall', 'Fastball').fillna('Unknown').astype(str)
         full_df['Date_str'] = pd.to_datetime(full_df['Date'], errors='coerce').dt.strftime('%Y-%m-%d')
         
-        st.sidebar.title("📊 MENU")
+        st.sidebar.title("◆ MENU")
         mode = st.sidebar.radio("分析モード", ["投手分析", "打者分析"])
 
         if mode == "投手分析":
-            st.sidebar.subheader("👤 投手設定")
+            st.sidebar.subheader("● 投手設定")
             p1 = st.sidebar.selectbox("投手を選択", sorted(full_df['Pitcher'].dropna().unique().astype(str)))
             p1_full = full_df[full_df['Pitcher'].astype(str) == p1].copy()
             s_files = st.sidebar.multiselect("ファイル選択", sorted(p1_full['SeasonFile'].unique()), key="pf")
@@ -132,7 +132,7 @@ if check_password():
             p_throws = target_df['PitcherThrows'].iloc[0] if not target_df.empty else 'Right'
             p_sub_mode = st.sidebar.radio("投手分析メニュー", ["総合レポート", "1人集中分析", "2人比較"])
             
-            st.header(f"📋 {p1} 投手分析：{p_sub_mode}")
+            st.header(f" {p1} 投手分析：{p_sub_mode}")
             if p_sub_mode == "総合レポート":
                 c1, c2 = st.columns(2)
                 with c1:
@@ -175,7 +175,7 @@ if check_password():
                 col1, col2 = st.columns(2)
                 for d, col, name in [(target_df, col1, p1), (p2_df, col2, p2)]:
                     with col:
-                        st.subheader(f"👤 {name}")
+                        st.subheader(f" {name}")
                         fig, ax = plt.subplots(figsize=(6, 6))
                         for pt in PITCH_LIST:
                             sub = d[d['TaggedPitchType']==pt]
@@ -184,7 +184,7 @@ if check_password():
                         display_pitcher_table(d)
 
         elif mode == "打者分析":
-            st.sidebar.subheader("👤 打者設定")
+            st.sidebar.subheader(" 打者設定")
             b_col = 'Batter' if 'Batter' in full_df.columns else 'Batter Name'
             sel_b = st.sidebar.selectbox("打者を選択", sorted(full_df[b_col].dropna().unique().astype(str)))
             b_full_df = full_df[full_df[b_col].astype(str) == sel_b].copy()
@@ -197,7 +197,7 @@ if check_password():
             target_col = st.sidebar.selectbox("コース別表示項目", ["打球速度", "打球角度", "飛距離"])
             angle_metric = st.sidebar.selectbox("角度グラフの指標", ["打率", "平均飛距離", "平均打球速度"])
             
-            st.title(f"🎯 {sel_b} 分析レポート")
+            st.title(f" {sel_b} 分析レポート")
             if not target_df.empty:
                 col_m = {"打球速度": "ExitSpeed", "打球角度": "Angle", "飛距離": "Distance"}
                 unit_m = {"打球速度": "km/h", "打球角度": "°", "飛距離": "m"}
@@ -235,7 +235,7 @@ if check_password():
                 res_col = 'PlayResult' if 'PlayResult' in target_df.columns else 'Result'
                 hit_k = ['Single', 'Double', 'Triple', 'HomeRun']
                 with low1:
-                    st.subheader(f"📐 角度別 {angle_metric}")
+                    st.subheader(f"● 角度別 {angle_metric}")
                     bins = np.arange(-20, 71, 10); centers = bins[:-1] + 5; theta = np.deg2rad(centers)
                     vals = []
                     for b_idx in range(len(bins)-1):
@@ -252,7 +252,7 @@ if check_password():
                     ax_p.set_thetamin(-25); ax_p.set_thetamax(75); ax_p.set_theta_zero_location('E')
                     ax_p.set_xticks(np.deg2rad(bins)); ax_p.set_xticklabels([f"{a}°" for a in bins]); st.pyplot(fig_p)
                 with low2:
-                    st.subheader("⚾ 打球分布 (Spray Chart)")
+                    st.subheader("● 打球分布 (Spray Chart)")
                     if 'Bearing' in target_df.columns and 'Distance' in target_df.columns:
                         fig_s, ax_s = plt.subplots(figsize=(6, 6)); draw_field(ax_s)
                         hr = target_df[target_df[res_col] == 'HomeRun']
