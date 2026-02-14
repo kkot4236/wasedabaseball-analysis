@@ -56,21 +56,18 @@ if check_password():
                 b_col = 'Batter' if 'Batter' in df_b.columns else 'Batter Name'
                 sel_b = st.selectbox("打者を選択", sorted(df_b[b_col].dropna().unique()), key="b_s")
                 v_view = st.radio("表示視点", ["投手目線", "捕手目線"])
-                
                 st.markdown("---")
-                # --- 追加：表示項目の選択 ---
                 target_col = st.selectbox("表示項目を選択", ["打球速度", "打球角度", "飛距離"])
                 
-                # 項目ごとの設定
                 col_map = {"打球速度": "ExitSpeed", "打球角度": "Angle", "飛距離": "Distance"}
                 unit_map = {"打球速度": "km/h", "打球角度": "°", "飛距離": "m"}
-                # 色付けの基準範囲 (V_MIN, V_MAX)
                 norm_map = {"打球速度": (110, 155), "打球角度": (0, 30), "飛距離": (0, 100)}
                 
                 data_col = col_map[target_col]
                 unit = unit_map[target_col]
                 v_min, v_max = norm_map[target_col]
 
+            # --- 1. コース別ヒートマップ ---
             st.title(f"🎯 {sel_b} コース別 {target_col} 分析")
             target_df = df_b[(df_b[b_col] == sel_b) & (df_b[data_col].notna())].copy()
 
@@ -91,27 +88,21 @@ if check_password():
                     subset = filters[i]
                     fig, ax = plt.subplots(figsize=(7, 9))
                     draw_stylish_batter(ax, batter_side=hand)
-                    
                     for r in range(5):
                         for c in range(5):
                             x_min, x_max = x_edges[c], x_edges[c+1]
                             y_min, y_max = y_edges[4-r], y_edges[5-r]
-                            
                             side_mod = -1 if v_view == "捕手目線" else 1
                             mask = (subset['PlateLocSide_cm'] * side_mod >= x_min) & \
                                    (subset['PlateLocSide_cm'] * side_mod < x_max) & \
                                    (subset['PlateLocHeight_cm'] >= y_min) & \
                                    (subset['PlateLocHeight_cm'] < y_max)
-                            
                             zone_data = subset[mask]
                             if not zone_data.empty:
                                 val = zone_data[data_col].mean()
                                 n = len(zone_data)
                                 norm_v = (val - v_min) / (v_max - v_min)
-                                
-                                # 色設定：速度と飛距離は「赤（高いほど強い）」、角度は「青〜緑（適正範囲）」などカスタマイズも可能ですが、まずは統一感重視で赤系にします
                                 color = cm.Reds(np.clip(norm_v, 0, 1))
-                                
                                 ax.add_patch(plt.Rectangle((x_min, y_min), x_max-x_min, y_max-y_min, 
                                              color=color, alpha=0.9, ec='white', lw=0.5, zorder=5))
                                 text_col = 'white' if norm_v > 0.6 else 'black'
@@ -122,5 +113,41 @@ if check_password():
                     ax.set_xlim(-75, 75); ax.set_ylim(15, 165); ax.set_aspect('equal')
                     ax.set_title(titles[i], fontsize=15, fontweight='bold'); ax.axis('off')
                     col_ax.pyplot(fig)
+
+                # --- 2. 打球角度の分布（追加項目） ---
+                st.markdown("---")
+                st.subheader(f"📈 {sel_b} 打球角度分布（10度刻み）")
+                
+                # 角度データのクリーニング（Angleカラムを想定）
+                angle_col = "Angle" 
+                angle_df = target_df[target_df[angle_col].notna()].copy()
+                
+                if not angle_df.empty:
+                    # -30度から60度まで10度刻みでビンを作成
+                    bins = np.arange(-30, 70, 10)
+                    labels = [f"{i}〜{i+10}°" for i in bins[:-1]]
+                    angle_df['AngleBin'] = pd.cut(angle_df[angle_col], bins=bins, labels=labels)
+                    
+                    # 割合を計算
+                    angle_dist = angle_df['AngleBin'].value_counts(normalize=True).sort_index() * 100
+                    
+                    # 棒グラフ描画
+                    fig_bar, ax_bar = plt.subplots(figsize=(12, 5))
+                    bars = ax_bar.bar(angle_dist.index, angle_dist.values, color='darkred', alpha=0.7, edgecolor='black')
+                    
+                    # 棒の上に％を表示
+                    for bar in bars:
+                        height = bar.get_height()
+                        ax_bar.text(bar.get_x() + bar.get_width()/2., height + 0.5,
+                                    f'{height:.1f}%', ha='center', va='bottom', fontweight='bold')
+                    
+                    ax_bar.set_ylabel("割合 (%)", fontsize=12)
+                    ax_bar.set_xlabel("打球角度", fontsize=12)
+                    ax_bar.set_ylim(0, max(angle_dist.values) + 10)
+                    ax_bar.grid(axis='y', linestyle='--', alpha=0.7)
+                    plt.xticks(rotation=0)
+                    st.pyplot(fig_bar)
+                else:
+                    st.info("角度データがありません。")
             else:
-                st.warning(f"{target_col}のデータがありません。")
+                st.warning("表示可能なデータがありません。")
