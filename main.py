@@ -23,19 +23,16 @@ def check_password():
 if check_password():
     st.set_page_config(layout="wide", page_title="野球部データ分析 Pro+")
 
-    # --- 2. 共通関数（シルエット描画：ご提示のコード通り） ---
+    # --- 2. 共通関数（シルエット描画：ご提示コード再現） ---
     def draw_stylish_batter(ax, batter_side='Right'):
         x_offset = 50 if batter_side == 'Right' else -50
         flip = -1 if batter_side == 'Right' else 1
-        color = '#333333'
-        alpha = 0.12
+        color = '#333333'; alpha = 0.12
         ax.add_patch(plt.Circle((x_offset, 130), 5, color=color, alpha=alpha, zorder=0))
         body = plt.Polygon(np.array([[x_offset-8, 80], [x_offset+8, 80], [x_offset+12, 125], [x_offset-12, 125]]), color=color, alpha=alpha, zorder=0)
         ax.add_patch(body)
-        leg1 = plt.Polygon(np.array([[x_offset-8, 80], [x_offset-4, 80], [x_offset-12, 20], [x_offset-20, 20]]), color=color, alpha=alpha, zorder=0)
-        leg2 = plt.Polygon(np.array([[x_offset+4, 80], [x_offset+8, 80], [x_offset+15, 20], [x_offset+8, 20]]), color=color, alpha=alpha, zorder=0)
-        ax.add_patch(leg1)
-        ax.add_patch(leg2)
+        ax.add_patch(plt.Polygon(np.array([[x_offset-8, 80], [x_offset-4, 80], [x_offset-12, 20], [x_offset-20, 20]]), color=color, alpha=alpha, zorder=0))
+        ax.add_patch(plt.Polygon(np.array([[x_offset+4, 80], [x_offset+8, 80], [x_offset+15, 20], [x_offset+8, 20]]), color=color, alpha=alpha, zorder=0))
         bat = plt.Polygon(np.array([[x_offset+(10*flip), 115], [x_offset+(40*flip), 155], [x_offset+(43*flip), 152], [x_offset+(13*flip), 112]]), color=color, alpha=0.18, zorder=0)
         ax.add_patch(bat)
 
@@ -43,11 +40,10 @@ if check_password():
     def load_csv(file_path):
         try: df = pd.read_csv(file_path, encoding='cp932')
         except: df = pd.read_csv(file_path, encoding='utf-8')
-        # 単位変換：ftをcmにするため 30.48 ではなく、ご提示の意図に合わせ「* 100」で処理します
-        # ただし、元データが1.5(ft)などの場合、100倍すると150cmになり、y_edges(120)を超えてしまいます。
-        # ここではTrackman標準の ft->cm (30.48) を使いつつ、表示を調整します。
-        df['PlateLocSide_cm'] = df['PlateLocSide'] * 30.48
-        df['PlateLocHeight_cm'] = df['PlateLocHeight'] * 30.48
+        
+        # 単位変換: m -> cm (単位がメートルであることを前提に * 100)
+        df['PlateLocSide_cm'] = df['PlateLocSide'] * 100
+        df['PlateLocHeight_cm'] = df['PlateLocHeight'] * 100
         return df
 
     # --- 3. UI切替 ---
@@ -57,26 +53,31 @@ if check_password():
 
     if files:
         if mode == "投手分析":
-            # 投手分析用 (省略)
-            st.info("投手分析モードです。サイドバーから選択してください。")
+            with st.sidebar:
+                st.header("🔥 PITCHER SETTINGS")
+                sel_file_p = st.selectbox("ファイルを選択", files, key="p_f")
+                df_p = load_csv(os.path.join(DATA_DIR, sel_file_p))
+                p_col = 'Pitcher' if 'Pitcher' in df_p.columns else 'Pitcher Name'
+                sel_p = st.selectbox("投手を選択", sorted(df_p[p_col].dropna().unique()), key="p_s")
+            st.title(f"📊 {sel_p} 投手分析")
+            # 投手用詳細はこちらへ
+
         else:
-            # --- 打者分析：ご提示のロジックを完全再現 ---
             with st.sidebar:
                 st.header("⚾ BATTER SETTINGS")
-                sel_file = st.selectbox("ファイルを選択", files)
-                df_all = load_csv(os.path.join(DATA_DIR, sel_file))
-                b_col = 'Batter' if 'Batter' in df_all.columns else 'Batter Name'
-                b_list = sorted(df_all[b_col].dropna().unique())
-                sel_b = st.selectbox("打者を選択", b_list)
+                sel_file_b = st.selectbox("ファイルを選択", files, key="b_f")
+                df_b = load_csv(os.path.join(DATA_DIR, sel_file_b))
+                b_col = 'Batter' if 'Batter' in df_b.columns else 'Batter Name'
+                sel_b = st.selectbox("打者を選択", sorted(df_b[b_col].dropna().unique()), key="b_s")
                 v_view = st.radio("表示視点", ["投手目線", "捕手目線"])
 
-            st.title(f"🎯 {sel_b} 打球速度 9分割分析")
-            
-            target_df = df_all[(df_all[b_col] == sel_b) & (df_all['ExitSpeed'].notna())].copy()
+            st.title(f"🎯 {sel_b} 打撃詳細分析")
+            target_df = df_b[(df_b[b_col] == sel_b) & (df_b['ExitSpeed'].notna())].copy()
+
             if not target_df.empty:
-                batter_hand = target_df['BatterSide'].mode()[0] if 'BatterSide' in target_df.columns else 'Right'
+                hand = target_df['BatterSide'].mode()[0] if 'BatterSide' in target_df.columns else 'Right'
                 
-                # エリア境界（ご提示の通り）
+                # --- ご提示の境界線を完全再現 ---
                 x_edges = [-36.5, -21.5, -7.17, 7.17, 21.5, 36.5]
                 y_edges = [30.0, 45.0, 65.0, 85.0, 105.0, 120.0]
                 V_MIN, V_MAX = 110, 155
@@ -92,36 +93,37 @@ if check_password():
                 for i, col_ax in enumerate([c1, c2, c3]):
                     subset = filters[i]
                     fig, ax = plt.subplots(figsize=(7, 9))
-                    draw_stylish_batter(ax, batter_side=batter_hand)
-
-                    # 5x5 グリッド描画（ご提示のネストループを完全再現）
+                    draw_stylish_batter(ax, batter_side=hand)
+                    
+                    # --- ご提示の5x5ループ・高め(4-r)を正確に再現 ---
                     for r in range(5):
                         for c in range(5):
                             x_min, x_max = x_edges[c], x_edges[c+1]
-                            y_min, y_max = y_edges[4-r], y_edges[5-r] # ここで高さを上から順に判定
+                            y_min, y_max = y_edges[4-r], y_edges[5-r]
                             
                             side_mod = -1 if v_view == "捕手目線" else 1
-                            zone_data = subset[(subset['PlateLocSide_cm'] * side_mod >= x_min) & 
-                                               (subset['PlateLocSide_cm'] * side_mod < x_max) &
-                                               (subset['PlateLocHeight_cm'] >= y_min) & 
-                                               (subset['PlateLocHeight_cm'] < y_max)]
+                            mask = (subset['PlateLocSide_cm'] * side_mod >= x_min) & \
+                                   (subset['PlateLocSide_cm'] * side_mod < x_max) & \
+                                   (subset['PlateLocHeight_cm'] >= y_min) & \
+                                   (subset['PlateLocHeight_cm'] < y_max)
                             
+                            zone_data = subset[mask]
                             if not zone_data.empty:
                                 avg_v = zone_data['ExitSpeed'].mean()
-                                count = len(zone_data)
+                                n = len(zone_data)
                                 norm_v = (avg_v - V_MIN) / (V_MAX - V_MIN)
-                                color = plt.cm.Reds(np.clip(norm_v, 0, 1))
+                                color = cm.Reds(np.clip(norm_v, 0, 1))
                                 
                                 ax.add_patch(plt.Rectangle((x_min, y_min), x_max-x_min, y_max-y_min, 
-                                             color=color, alpha=0.9, ec='white', lw=0.5, zorder=1))
+                                             color=color, alpha=0.9, ec='white', lw=0.5, zorder=5))
                                 text_col = 'white' if norm_v > 0.6 else 'black'
-                                ax.text((x_min + x_max)/2, (y_min + y_max)/2, f"{avg_v:.1f}\n$n$={count}", 
+                                ax.text((x_min+x_max)/2, (y_min+y_max)/2, f"{avg_v:.1f}\n$n$={n}", 
                                         ha='center', va='center', fontweight='bold', fontsize=9, color=text_col, zorder=10)
 
-                    # ストライクゾーン枠
-                    ax.add_patch(plt.Rectangle((-21.5, 45.0), 43.0, 60.0, fill=False, edgecolor='black', lw=2, zorder=15))
+                    # ストライクゾーン強調
+                    ax.add_patch(plt.Rectangle((-21.5, 45.0), 43.0, 60.0, fill=False, ec='black', lw=2.5, zorder=15))
                     ax.set_xlim(-75, 75); ax.set_ylim(15, 165); ax.set_aspect('equal')
                     ax.set_title(titles[i], fontsize=15, fontweight='bold'); ax.axis('off')
                     col_ax.pyplot(fig)
             else:
-                st.warning("データが見つかりません。")
+                st.warning("データがありません。")
