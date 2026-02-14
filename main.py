@@ -17,14 +17,14 @@ def check_password():
             st.session_state["password_correct"] = True
         else:
             st.session_state["password_correct"] = False
-    st.title("東京六大学 Trackman分析データベース")
+    st.title("東京六大学 Trackmanデータベース")
     st.text_input("パスワードを入力してください", type="password", on_change=password_entered, key="password_input")
     if st.session_state["password_correct"] == False:
         st.error("パスワードが違います。")
     return st.session_state["password_correct"]
 
 if check_password():
-    st.set_page_config(layout="wide", page_title="東京六大学 Trackman分析データベース")
+    st.set_page_config(layout="wide", page_title="東京六大学 Trackmanデータベース")
 
     # --- 2. 共通設定・描画関数 ---
     PITCH_LIST = ['Fastball', 'Slider', 'Cutter', 'Curveball', 'Splitter', 'ChangeUp', 'Sinker', 'TwoSeamFastBall']
