@@ -86,7 +86,7 @@ if check_password():
         mode = st.radio("🏠 分析モード", ["🔥 投手分析", "⚾ 打者分析"], horizontal=True)
 
         # ==========================================
-        # 🔥 投手分析
+        # 🔥 投手分析 (初期の要望通り復元)
         # ==========================================
         if mode == "🔥 投手分析":
             st.sidebar.title("🔥 PITCHER MENU")
@@ -132,62 +132,74 @@ if check_password():
                             fig, ax = plt.subplots(); ax.add_patch(plt.Rectangle((-21.5, 45), 43, 60, fill=False, lw=2, ec='black'))
                             draw_stylish_batter(ax, side, v_p)
                             d_s = p_full[p_full['BatterSide']==side]
-                            plot_x = d_s['PlateLocSide'] * (-1 if v_p == "捕手目線" else 1)
+                            px = d_s['PlateLocSide'] * (-1 if v_p == "捕手目線" else 1)
                             for pt in d_s['TaggedPitchType'].unique():
-                                d_p = d_s[d_s['TaggedPitchType']==pt]
-                                ax.scatter(plot_x[d_s['TaggedPitchType']==pt], d_p['PlateLocHeight'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
+                                mask = d_s['TaggedPitchType']==pt
+                                ax.scatter(px[mask], d_s.loc[mask, 'PlateLocHeight'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
                             ax.set_xlim(-100,100); ax.set_ylim(0,200); ax.set_title(f"対 {side}打者"); ax.legend(fontsize=7); st.pyplot(fig)
 
         # ==========================================
-        # ⚾ 打者分析
+        # ⚾ 打者分析 (高度機能統合版)
         # ==========================================
         elif mode == "⚾ 打者分析":
             st.sidebar.title("⚾ BATTER MENU")
             sel_b = st.sidebar.selectbox("打者を選択", b_list)
             v_b = st.sidebar.radio("表示視点", ["投手目線", "捕手目線"])
-            
             b_full = df_full[df_full[b_col].astype(str) == sel_b].copy()
             st.header(f"🎯 {sel_b} 打者：分析レポート")
 
             if not b_full.empty:
-                col_left, col_right = st.columns([1, 1])
-                
-                with col_left:
+                # 段組み1: 角度分布 ＆ スプレーチャート
+                c_top1, c_top2 = st.columns(2)
+                with c_top1:
                     st.subheader("📐 角度別飛距離＆頻度")
                     angle_data = b_full.dropna(subset=['Angle', 'Distance'])
                     if not angle_data.empty:
                         bins = np.arange(-30, 81, 10)
                         angle_data['bin'] = pd.cut(angle_data['Angle'], bins=bins)
                         bin_stats = angle_data.groupby('bin', observed=False).agg({'Distance':'mean', 'Angle':'count'}).reset_index()
-                        bin_stats['Distance'] = bin_stats['Distance'].fillna(0)
-                        bin_stats['Angle'] = bin_stats['Angle'].fillna(0)
+                        bin_stats.fillna(0, inplace=True)
                         total_cnt = bin_stats['Angle'].sum()
                         bin_stats['perc'] = (bin_stats['Angle'] / total_cnt * 100) if total_cnt > 0 else 0
-                        
                         theta = np.deg2rad(bins[:-1] + 5)
-                        radii = bin_stats['Distance'].values
-                        percents = bin_stats['perc'].values
-                        
                         fig_p = plt.figure(figsize=(6, 6))
                         ax_p = fig_p.add_subplot(111, polar=True)
                         ax_p.set_theta_zero_location('E'); ax_p.set_thetamin(-40); ax_p.set_thetamax(90)
                         cmap = cm.get_cmap('Oranges')
-                        max_p = max(percents) if max(percents) > 0 else 1
-                        ax_p.bar(theta, radii, width=np.deg2rad(10), color=[cmap(p/max_p) for p in percents], edgecolor='black', alpha=0.8)
-                        ax_p.set_yticks([30, 60, 90, 120]); ax_p.set_yticklabels(["30m", "60m", "90m", "120m"], fontsize=8)
-                        st.pyplot(fig_p)
-                        st.caption("※扇の長さ＝平均飛距離(m)　色の濃さ＝出現割合(%)")
+                        max_p = max(bin_stats['perc']) if max(bin_stats['perc']) > 0 else 1
+                        ax_p.bar(theta, bin_stats['Distance'], width=np.deg2rad(10), color=[cmap(p/max_p) for p in bin_stats['perc']], edgecolor='black', alpha=0.8)
+                        ax_p.set_yticks([30, 60, 90]); ax_p.set_yticklabels(["30m", "60m", "90m"], fontsize=8); st.pyplot(fig_p)
 
-                with col_right:
+                with c_top2:
                     st.subheader("🏹 打球方向分布")
                     spray_df = b_full.dropna(subset=['Bearing', 'Distance', 'ExitSpeed'])
                     if not spray_df.empty:
                         fig_s, ax_s = plt.subplots(figsize=(6, 6))
                         draw_field(ax_s)
                         rad = np.deg2rad(spray_df['Bearing'])
-                        sc = ax_s.scatter(spray_df['Distance']*np.sin(rad), spray_df['Distance']*np.cos(rad), 
-                                         c=spray_df['ExitSpeed'], cmap='YlOrRd', s=40, edgecolors='k', alpha=0.7)
-                        plt.colorbar(sc, label="打球速度 (km/h)")
-                        st.pyplot(fig_s)
+                        sc = ax_s.scatter(spray_df['Distance']*np.sin(rad), spray_df['Distance']*np.cos(rad), c=spray_df['ExitSpeed'], cmap='YlOrRd', s=40, edgecolors='k', alpha=0.7)
+                        plt.colorbar(sc, label="速度(km/h)"); st.pyplot(fig_s)
+
+                st.markdown("---")
+                # 段組み2: コース別詳細ヒートマップ
+                st.subheader("🎯 コース別詳細（打球速度・角度・飛距離）")
+                metric = st.selectbox("表示指標", ["打球速度 (km/h)", "打球角度 (deg)", "飛距離 (m)"])
+                m_map = {"打球速度 (km/h)": ("ExitSpeed", "Reds", 110, 160), "打球角度 (deg)": ("Angle", "Greens", 5, 35), "飛距離 (m)": ("Distance", "Blues", 40, 110)}
+                col_n, cmap_n, vm, vx = m_map[metric]
+
+                fig_h, ax_h = plt.subplots(figsize=(8, 7))
+                draw_stylish_batter(ax_h, 'Right', v_b)
+                x_edges, y_edges = np.linspace(-36.5, 36.5, 4), np.linspace(45, 105, 4)
+                b_full['px'] = b_full['PlateLocSide'] * (-1 if v_b == "捕手目線" else 1)
+                for i in range(3):
+                    for j in range(3):
+                        cell = b_full[(b_full['px'] >= x_edges[j]) & (b_full['px'] < x_edges[j+1]) & (b_full['PlateLocHeight'] >= y_edges[i]) & (b_full['PlateLocHeight'] < y_edges[i+1])]
+                        if not cell.empty:
+                            val = cell[col_n].mean()
+                            ax_h.add_patch(plt.Rectangle((x_edges[j], y_edges[i]), x_edges[j+1]-x_edges[j], y_edges[i+1]-y_edges[i], color=plt.get_cmap(cmap_n)((val-vm)/(vx-vm)), alpha=0.8, ec='white'))
+                            ax_h.text((x_edges[j]+x_edges[j+1])/2, (y_edges[i]+y_edges[i+1])/2, f"{val:.1f}\n(n={len(cell)})", ha='center', va='center', fontweight='bold')
+                ax_h.add_patch(plt.Rectangle((-21.5, 45), 43, 60, fill=False, lw=3, ec='black'))
+                ax_h.set_xlim(-80, 80); ax_h.set_ylim(20, 150); ax_h.axis('off'); st.pyplot(fig_h)
+
     else:
-        st.error("データが読み込めませんでした。")
+        st.error("CSVデータが見つかりません。")
