@@ -26,13 +26,21 @@ def check_password():
 if check_password():
     st.set_page_config(layout="wide", page_title="野球部データ分析 Pro+")
 
-    # --- 2. 共通設定・描画関数 ---
+    # --- 2. 共通設定・関数 ---
     PITCH_LIST = ['Fastball', 'Slider', 'Cutter', 'Curveball', 'Splitter', 'ChangeUp', 'Sinker', 'TwoSeamFastBall']
     PITCH_COLORS = {
         'Fastball': '#FF4B4B', 'Slider': '#1E90FF', 'Cutter': '#FF1493', 
         'Curveball': '#32CD32', 'Splitter': '#40E0D0', 'ChangeUp': '#8A2BE2', 
         'Sinker': '#FFA500', 'TwoSeamFastBall': '#FF8C00'
     }
+
+    def get_marker(pitch_type, throws):
+        if pitch_type == 'Fastball': return 'o'
+        if pitch_type in ['Slider', 'Cutter']: return '<' if throws == 'Right' else '>'
+        if pitch_type == 'Splitter': return 's'
+        if pitch_type in ['ChangeUp', 'Sinker']: return 'v'
+        if pitch_type == 'Curveball': return '^'
+        return 'o'
 
     def draw_field(ax):
         r_foul = 120 
@@ -44,9 +52,6 @@ if check_password():
             ax.text(0, dist + 2, f"{dist}m", color='gray', fontsize=8, ha='center', alpha=0.7)
         r_fence = 110
         ax.plot(r_fence * np.cos(theta), r_fence * np.sin(theta), color='black', lw=2.5, zorder=2)
-        ax.plot([-27.4/np.sqrt(2)*2, 0, 27.4/np.sqrt(2)*2, 0, -27.4/np.sqrt(2)*2], 
-                [27.4/np.sqrt(2), 27.4*np.sqrt(2), 27.4/np.sqrt(2), 0, 27.4/np.sqrt(2)], 
-                color='green', lw=1, ls='-', alpha=0.3)
         ax.set_aspect('equal'); ax.axis('off')
 
     def draw_stylish_batter(ax, batter_side='Right'):
@@ -59,6 +64,28 @@ if check_password():
         bat = plt.Polygon(np.array([[x_offset+(10*flip), 115], [x_offset+(40*flip), 155], [x_offset+(43*flip), 152], [x_offset+(13*flip), 112]]), color=color, alpha=0.18, zorder=0)
         ax.add_patch(bat)
 
+    def display_pitcher_table(df):
+        if df.empty: return
+        total = len(df)
+        df = df.copy()
+        df['is_strike'] = df['PitchCall'].isin(['StrikeCalled', 'StrikeSwinging', 'FoulBall', 'InPlayOut', 'Single', 'Double', 'Triple', 'HomeRun'])
+        df['is_whiff'] = df['PitchCall'] == 'StrikeSwinging'
+        df['is_swing'] = df['PitchCall'].isin(['StrikeSwinging', 'FoulBall', 'InPlayOut', 'Single', 'Double', 'Triple', 'HomeRun'])
+        
+        agg_map = {'RelSpeed': 'mean', 'SpinRate': 'mean', 'InducedVertBreak': 'mean', 'HorzBreak': 'mean'}
+        actual_agg = {k: v for k, v in agg_map.items() if k in df.columns}
+        actual_agg['Pitcher'] = 'count'
+        
+        res = df.groupby('TaggedPitchType', observed=True).agg(actual_agg).reset_index()
+        whiff_res = df.groupby('TaggedPitchType', observed=True).apply(lambda x: (x['is_whiff'].sum() / x['is_swing'].sum() * 100) if x['is_swing'].sum() > 0 else 0).reset_index(name='Whiff%')
+        strike_res = df.groupby('TaggedPitchType', observed=True).apply(lambda x: x['is_strike'].mean() * 100).reset_index(name='Strike%')
+        
+        res = res.merge(whiff_res, on='TaggedPitchType').merge(strike_res, on='TaggedPitchType')
+        res['投球割合(球数)'] = res['Pitcher'].apply(lambda x: f"{x/total*100:.1f}% ({x})")
+        res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
+        res = res.sort_values('TaggedPitchType').dropna(subset=['TaggedPitchType'])
+        st.dataframe(res.rename(columns={'TaggedPitchType':'球種','RelSpeed':'平均(km/h)','SpinRate':'回転数','InducedVertBreak':'縦変化','HorzBreak':'横変化'}).style.format(precision=1), use_container_width=True, hide_index=True)
+
     @st.cache_data
     def load_all_data(data_dir):
         all_data = []
@@ -66,7 +93,7 @@ if check_password():
             for f in [f for f in os.listdir(data_dir) if f.endswith('.csv')]:
                 try:
                     temp = pd.read_csv(os.path.join(data_dir, f))
-                    num_cols = ['RelSpeed', 'InducedVertBreak', 'HorzBreak', 'RelHeight', 'RelSide', 'PlateLocSide', 'PlateLocHeight', 'ExitSpeed', 'Angle', 'Distance', 'Bearing']
+                    num_cols = ['RelSpeed', 'InducedVertBreak', 'HorzBreak', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle', 'HorzRelAngle', 'SpinRate', 'PlateLocSide', 'PlateLocHeight', 'ExitSpeed', 'Angle', 'Distance', 'Bearing']
                     for c in num_cols:
                         if c in temp.columns: temp[c] = pd.to_numeric(temp[c], errors='coerce')
                     if 'PlateLocSide' in temp.columns: temp['PlateLocSide_cm'] = temp['PlateLocSide'] * 100
@@ -87,43 +114,105 @@ if check_password():
         st.sidebar.title("📊 MENU")
         mode = st.sidebar.radio("分析モード", ["投手分析", "打者分析"])
 
-        # --- モード共通のサイドバー処理 ---
         if mode == "投手分析":
-            p_col = 'Pitcher'
             st.sidebar.subheader("👤 投手設定")
-        else:
-            p_col = 'Batter' if 'Batter' in full_df.columns else 'Batter Name'
-            st.sidebar.subheader("👤 打者設定")
+            p1 = st.sidebar.selectbox("投手を選択", sorted(full_df['Pitcher'].dropna().unique().astype(str)))
+            p1_full = full_df[full_df['Pitcher'].astype(str) == p1].copy()
+            
+            s_files = st.sidebar.multiselect("ファイル選択", sorted(p1_full['SeasonFile'].unique()), key="pf")
+            s_dates = st.sidebar.multiselect("日付選択", sorted(p1_full['Date_str'].dropna().unique(), reverse=True), key="pd")
+            
+            target_df = p1_full.copy()
+            if s_files: target_df = target_df[target_df['SeasonFile'].isin(s_files)]
+            if s_dates: target_df = target_df[target_df['Date_str'].isin(s_dates)]
+            p_throws = target_df['PitcherThrows'].iloc[0] if not target_df.empty else 'Right'
 
-        target_person = st.sidebar.selectbox(f"{mode[:-2]}を選択", sorted(full_df[p_col].dropna().unique().astype(str)))
-        person_full_df = full_df[full_df[p_col].astype(str) == target_person].copy()
-        
-        # ファイルと日付の絞り込み（打者・投手共通）
-        s_files = st.sidebar.multiselect("ファイル選択", sorted(person_full_df['SeasonFile'].unique()))
-        s_dates = st.sidebar.multiselect("日付選択", sorted(person_full_df['Date_str'].dropna().unique(), reverse=True))
-        
-        target_df = person_full_df.copy()
-        if s_files: target_df = target_df[target_df['SeasonFile'].isin(s_files)]
-        if s_dates: target_df = target_df[target_df['Date_str'].isin(s_dates)]
+            # 投手メニューのラジオボタンをここで表示（これが消えていたため中身が出ませんでした）
+            p_sub_mode = st.sidebar.radio("投手分析メニュー", ["総合レポート", "1人集中分析", "2人比較"])
+            
+            st.header(f"📋 {p1} 投手分析：{p_sub_mode}")
 
-        if mode == "投手分析":
-            # (既存の投手分析コード... 省略せずに統合)
-            st.header(f"📋 {target_person} 投手分析")
-            # 投手分析の詳細は前回のスクリプトと同様に動作します
-            # ここでは打者分析の修正をメインに記述します
+            if p_sub_mode == "総合レポート":
+                c1, c2 = st.columns(2)
+                with c1:
+                    fig, ax = plt.subplots(figsize=(6, 6))
+                    for pt in PITCH_LIST:
+                        d = target_df[target_df['TaggedPitchType']==pt]
+                        if not d.empty: ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6, marker=get_marker(pt, p_throws))
+                    ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1); ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_title("変化量(cm)"); ax.set_box_aspect(1); st.pyplot(fig)
+                with c2:
+                    fig, ax = plt.subplots(figsize=(6, 6))
+                    for pt in PITCH_LIST:
+                        d = target_df[target_df['TaggedPitchType']==pt]
+                        if not d.empty: ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6, marker=get_marker(pt, p_throws))
+                    ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1); ax.set_xlim(-6,6); ax.set_ylim(-6,6); ax.set_title("リリースアングル"); ax.set_box_aspect(1); st.pyplot(fig)
+                display_pitcher_table(target_df)
+
+            elif p_sub_mode == "1人集中分析":
+                item = st.sidebar.radio("分析項目", ["変化量詳細", "到達位置", "3Dリリース", "リリース位置安定度", "球速・回転数", "球速vs変化量", "カウント別"])
+                if item == "変化量詳細":
+                    fig, ax = plt.subplots(figsize=(6, 6))
+                    for pt in target_df['TaggedPitchType'].unique():
+                        d = target_df[target_df['TaggedPitchType']==pt]
+                        ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6, marker=get_marker(pt, p_throws))
+                    ax.axvline(0); ax.axhline(0); ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_box_aspect(1); plt.legend(bbox_to_anchor=(1.05, 1)); st.pyplot(fig)
+                elif item == "到達位置":
+                    c1, c2 = st.columns(2)
+                    for side, col in [('Right', c1), ('Left', c2)]:
+                        with col:
+                            fig, ax = plt.subplots(figsize=(6, 6)); ax.add_patch(plt.Rectangle((-25, 45), 50, 60, fill=False, lw=2))
+                            d_s = target_df[target_df['BatterSide']==side]
+                            for pt in target_df['TaggedPitchType'].unique():
+                                d_p = d_s[d_s['TaggedPitchType']==pt]
+                                if not d_p.empty: ax.scatter(d_p['PlateLocSide_cm'], d_p['PlateLocHeight_cm'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
+                            ax.set_xlim(-100,100); ax.set_ylim(0,200); ax.set_box_aspect(1); ax.set_title(f"対 {side}打者"); st.pyplot(fig)
+                elif item == "3Dリリース":
+                    st.plotly_chart(px.scatter_3d(target_df.dropna(subset=['RelSide', 'Extension', 'RelHeight']), x='RelSide', y='Extension', z='RelHeight', color='TaggedPitchType', color_discrete_map=PITCH_COLORS), use_container_width=True)
+                elif item == "球速・回転数":
+                    c1, c2 = st.columns(2)
+                    with c1: st.plotly_chart(px.box(target_df, x="TaggedPitchType", y="RelSpeed", color="TaggedPitchType", color_discrete_map=PITCH_COLORS), use_container_width=True)
+                    with c2: st.plotly_chart(px.box(target_df, x="TaggedPitchType", y="SpinRate", color="TaggedPitchType", color_discrete_map=PITCH_COLORS), use_container_width=True)
+                elif item == "カウント別":
+                    target_df['Count'] = target_df['Balls'].fillna(0).astype(int).astype(str) + "-" + target_df['Strikes'].fillna(0).astype(int).astype(str)
+                    count_data = target_df.groupby(['Count', 'TaggedPitchType'], observed=True).size().unstack(fill_value=0)
+                    st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
+                display_pitcher_table(target_df)
+
+            elif p_sub_mode == "2人比較":
+                p2 = st.sidebar.selectbox("比較投手", sorted(full_df['Pitcher'].dropna().unique().astype(str)), index=1)
+                p2_df = full_df[full_df['Pitcher'].astype(str) == p2].copy()
+                st.subheader(f"⚖️ {p1} vs {p2}")
+                col1, col2 = st.columns(2)
+                for d, col, name in [(target_df, col1, p1), (p2_df, col2, p2)]:
+                    with col:
+                        st.subheader(f"👤 {name}")
+                        fig, ax = plt.subplots(figsize=(6, 6))
+                        for pt in PITCH_LIST:
+                            sub = d[d['TaggedPitchType']==pt]
+                            if not sub.empty: ax.scatter(sub['HorzBreak'], sub['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
+                        ax.axvline(0); ax.axhline(0); ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_box_aspect(1); st.pyplot(fig)
+                        display_pitcher_table(d)
 
         elif mode == "打者分析":
-            st.sidebar.markdown("---")
+            st.sidebar.subheader("👤 打者設定")
+            b_col = 'Batter' if 'Batter' in full_df.columns else 'Batter Name'
+            sel_b = st.sidebar.selectbox("打者を選択", sorted(full_df[b_col].dropna().unique().astype(str)))
+            b_full_df = full_df[full_df[b_col].astype(str) == sel_b].copy()
+            
+            s_files = st.sidebar.multiselect("ファイル選択", sorted(b_full_df['SeasonFile'].unique()), key="bf")
+            s_dates = st.sidebar.multiselect("日付選択", sorted(b_full_df['Date_str'].dropna().unique(), reverse=True), key="bd")
+            
+            target_df = b_full_df.copy()
+            if s_files: target_df = target_df[target_df['SeasonFile'].isin(s_files)]
+            if s_dates: target_df = target_df[target_df['Date_str'].isin(s_dates)]
+
             v_view = st.sidebar.radio("表示視点", ["投手目線", "捕手目線"])
             target_col = st.sidebar.selectbox("コース別表示項目", ["打球速度", "打球角度", "飛距離"])
             angle_metric = st.sidebar.selectbox("角度グラフの指標", ["打率", "平均飛距離", "平均打球速度"])
             
-            st.title(f"🎯 {target_person} 分析レポート")
-            if s_files or s_dates:
-                st.caption(f"フィルタ適用中: {len(target_df)} 打席のデータ")
+            st.title(f"🎯 {sel_b} 分析レポート")
             
             if not target_df.empty:
-                # --- A. ヒートマップ ---
                 col_m = {"打球速度": "ExitSpeed", "打球角度": "Angle", "飛距離": "Distance"}
                 unit_m = {"打球速度": "km/h", "打球角度": "°", "飛距離": "m"}
                 norm_m = {"打球速度": (110, 155), "打球角度": (0, 30), "飛距離": (0, 100)}
@@ -159,7 +248,6 @@ if check_password():
                     ax.set_xlim(-75, 75); ax.set_ylim(15, 165); ax.set_aspect('equal'); ax.axis('off'); ax.set_title(titles[i]); col_ax.pyplot(fig)
 
                 st.markdown("---")
-                # --- B & C. 下段レイアウト ---
                 low1, low2 = st.columns(2)
                 res_col = 'PlayResult' if 'PlayResult' in target_df.columns else 'Result'
                 hit_k = ['Single', 'Double', 'Triple', 'HomeRun']
@@ -200,4 +288,4 @@ if check_password():
                         ax_s.scatter(hrx, hry, color='gold', alpha=1.0, label='本塁打', s=120, marker='*', edgecolors='black', zorder=10)
                         ax_s.legend(loc='upper right', fontsize=8); ax_s.set_xlim(-100, 100); ax_s.set_ylim(-10, 130); st.pyplot(fig_s)
     else:
-        st.error("CSVデータが見つかりません。'data'フォルダを確認してください。")
+        st.error("CSVデータが見つかりません。")
