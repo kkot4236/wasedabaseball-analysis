@@ -117,12 +117,18 @@ if check_password():
 
         if mode == "投手分析":
             st.sidebar.subheader("👤 投手設定")
-            # 投手選択に「(全員)」を追加
             pitcher_options = ["(全員)"] + sorted(full_df['Pitcher'].dropna().unique().astype(str))
             p1 = st.sidebar.selectbox("投手を選択", pitcher_options)
             
+            # --- ここが利き腕フィルタリングの追加箇所 ---
             if p1 == "(全員)":
                 p1_full = full_df.copy()
+                # 全員選択時のみ利き腕フィルタを表示
+                throws_filter = st.sidebar.radio("投手の利き腕", ["すべて", "右投げのみ", "左投げのみ"])
+                if throws_filter == "右投げのみ":
+                    p1_full = p1_full[p1_full['PitcherThrows'].isin(['Right', 'R'])]
+                elif throws_filter == "左投げのみ":
+                    p1_full = p1_full[p1_full['PitcherThrows'].isin(['Left', 'L'])]
             else:
                 p1_full = full_df[full_df['Pitcher'].astype(str) == p1].copy()
 
@@ -133,7 +139,9 @@ if check_password():
             if s_files: target_df = target_df[target_df['SeasonFile'].isin(s_files)]
             if s_dates: target_df = target_df[target_df['Date_str'].isin(s_dates)]
             
+            # 利き腕の判定（描画用のマーカー向きに使用）
             p_throws = target_df['PitcherThrows'].mode()[0] if not target_df.empty and 'PitcherThrows' in target_df.columns else 'Right'
+            
             p_sub_mode = st.sidebar.radio("投手分析メニュー", ["総合レポート", "1人集中分析", "2人比較"])
             
             header_name = "チーム全体" if p1 == "(全員)" else p1
@@ -188,9 +196,10 @@ if check_password():
                 elif item == "球速vs変化量":
                     st.plotly_chart(px.scatter(target_df, x="RelSpeed", y="InducedVertBreak", color="TaggedPitchType", color_discrete_map=PITCH_COLORS), use_container_width=True)
                 elif item == "カウント別":
-                    target_df['Count'] = target_df['Balls'].fillna(0).astype(int).astype(str) + "-" + target_df['Strikes'].fillna(0).astype(int).astype(str)
-                    count_data = target_df.groupby(['Count', 'TaggedPitchType'], observed=True).size().unstack(fill_value=0)
-                    if not count_data.empty: st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
+                    if 'Balls' in target_df.columns and 'Strikes' in target_df.columns:
+                        target_df['Count'] = target_df['Balls'].fillna(0).astype(int).astype(str) + "-" + target_df['Strikes'].fillna(0).astype(int).astype(str)
+                        count_data = target_df.groupby(['Count', 'TaggedPitchType'], observed=True).size().unstack(fill_value=0)
+                        if not count_data.empty: st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
                 display_pitcher_table(target_df)
 
             elif p_sub_mode == "2人比較":
@@ -208,6 +217,7 @@ if check_password():
                         display_pitcher_table(d)
 
         elif mode == "打者分析":
+            # (以前と同じため中略... 打者分析コード)
             st.sidebar.subheader("👤 打者設定")
             b_col = 'Batter' if 'Batter' in full_df.columns else 'Batter Name'
             sel_b = st.sidebar.selectbox("打者を選択", sorted(full_df[b_col].dropna().unique().astype(str)))
