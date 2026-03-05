@@ -120,10 +120,8 @@ if check_password():
             pitcher_options = ["(全員)"] + sorted(full_df['Pitcher'].dropna().unique().astype(str))
             p1 = st.sidebar.selectbox("投手を選択", pitcher_options)
             
-            # --- ここが利き腕フィルタリングの追加箇所 ---
             if p1 == "(全員)":
                 p1_full = full_df.copy()
-                # 全員選択時のみ利き腕フィルタを表示
                 throws_filter = st.sidebar.radio("投手の利き腕", ["すべて", "右投げのみ", "左投げのみ"])
                 if throws_filter == "右投げのみ":
                     p1_full = p1_full[p1_full['PitcherThrows'].isin(['Right', 'R'])]
@@ -139,10 +137,10 @@ if check_password():
             if s_files: target_df = target_df[target_df['SeasonFile'].isin(s_files)]
             if s_dates: target_df = target_df[target_df['Date_str'].isin(s_dates)]
             
-            # 利き腕の判定（描画用のマーカー向きに使用）
             p_throws = target_df['PitcherThrows'].mode()[0] if not target_df.empty and 'PitcherThrows' in target_df.columns else 'Right'
             
-            p_sub_mode = st.sidebar.radio("投手分析メニュー", ["総合レポート", "1人集中分析", "2人比較"])
+            # --- 修正箇所：ラジオボタンの選択肢とif条件を一致させる ---
+            p_sub_mode = st.sidebar.radio("投手分析メニュー", ["総合レポート", "集中分析", "2人比較"])
             
             header_name = "チーム全体" if p1 == "(全員)" else p1
             st.header(f"◎ {header_name} 投手分析：{p_sub_mode}")
@@ -163,14 +161,16 @@ if check_password():
                     ax.axvline(0, color='black', lw=1); ax.axhline(0, color='black', lw=1); ax.set_xlim(-6,6); ax.set_ylim(-6,6); ax.set_title("リリースアングル"); ax.set_box_aspect(1); st.pyplot(fig)
                 display_pitcher_table(target_df)
 
-            elif p_sub_mode == "項目集中分析":
+            elif p_sub_mode == "集中分析":
                 item = st.sidebar.radio("分析項目", ["変化量詳細", "到達位置", "3Dリリース", "リリース位置安定度", "球速・回転数", "球速vs変化量", "カウント別"])
+                
                 if item == "変化量詳細":
                     fig, ax = plt.subplots(figsize=(6, 6))
                     for pt in target_df['TaggedPitchType'].unique():
                         d = target_df[target_df['TaggedPitchType']==pt]
                         ax.scatter(d['HorzBreak'], d['InducedVertBreak'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6, marker=get_marker(pt, p_throws))
                     ax.axvline(0); ax.axhline(0); ax.set_xlim(-80,80); ax.set_ylim(-80,80); ax.set_box_aspect(1); plt.legend(bbox_to_anchor=(1.05, 1)); st.pyplot(fig)
+                
                 elif item == "到達位置":
                     c1, c2 = st.columns(2)
                     for side, col in [('Right', c1), ('Left', c2)]:
@@ -181,25 +181,35 @@ if check_password():
                                 d_p = d_s[d_s['TaggedPitchType']==pt]
                                 if not d_p.empty: ax.scatter(d_p['PlateLocSide_cm'], d_p['PlateLocHeight_cm'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.5)
                             ax.set_xlim(-80,80); ax.set_ylim(0,180); ax.set_title(f"対 {side}打者"); st.pyplot(fig)
+                
                 elif item == "3Dリリース":
-                    st.plotly_chart(px.scatter_3d(target_df.dropna(subset=['RelSide', 'Extension', 'RelHeight']), x='RelSide', y='Extension', z='RelHeight', color='TaggedPitchType', color_discrete_map=PITCH_COLORS), use_container_width=True)
+                    plot_3d_df = target_df.dropna(subset=['RelSide', 'Extension', 'RelHeight'])
+                    if not plot_3d_df.empty:
+                        st.plotly_chart(px.scatter_3d(plot_3d_df, x='RelSide', y='Extension', z='RelHeight', color='TaggedPitchType', color_discrete_map=PITCH_COLORS), use_container_width=True)
+                    else:
+                        st.warning("3D表示に必要なデータがありません。")
+                
                 elif item == "リリース位置安定度":
                     fig, ax = plt.subplots(figsize=(6, 6))
                     for pt in target_df['TaggedPitchType'].unique():
                         d = target_df[target_df['TaggedPitchType']==pt]
                         ax.scatter(d['RelSide'], d['RelHeight'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
                     ax.set_xlabel("RelSide (ft)"); ax.set_ylabel("RelHeight (ft)"); ax.set_title("Release Point"); st.pyplot(fig)
+                
                 elif item == "球速・回転数":
                     c1, c2 = st.columns(2)
                     with c1: st.plotly_chart(px.box(target_df, x="TaggedPitchType", y="RelSpeed", color="TaggedPitchType", color_discrete_map=PITCH_COLORS), use_container_width=True)
                     with c2: st.plotly_chart(px.box(target_df, x="TaggedPitchType", y="SpinRate", color="TaggedPitchType", color_discrete_map=PITCH_COLORS), use_container_width=True)
+                
                 elif item == "球速vs変化量":
                     st.plotly_chart(px.scatter(target_df, x="RelSpeed", y="InducedVertBreak", color="TaggedPitchType", color_discrete_map=PITCH_COLORS), use_container_width=True)
+                
                 elif item == "カウント別":
                     if 'Balls' in target_df.columns and 'Strikes' in target_df.columns:
                         target_df['Count'] = target_df['Balls'].fillna(0).astype(int).astype(str) + "-" + target_df['Strikes'].fillna(0).astype(int).astype(str)
                         count_data = target_df.groupby(['Count', 'TaggedPitchType'], observed=True).size().unstack(fill_value=0)
                         if not count_data.empty: st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
+                
                 display_pitcher_table(target_df)
 
             elif p_sub_mode == "2人比較":
@@ -217,7 +227,6 @@ if check_password():
                         display_pitcher_table(d)
 
         elif mode == "打者分析":
-            # (以前と同じため中略... 打者分析コード)
             st.sidebar.subheader("◯ 打者設定")
             b_col = 'Batter' if 'Batter' in full_df.columns else 'Batter Name'
             sel_b = st.sidebar.selectbox("打者を選択", sorted(full_df[b_col].dropna().unique().astype(str)))
