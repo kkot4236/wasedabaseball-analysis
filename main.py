@@ -145,7 +145,7 @@ if check_password():
             p_sub_mode = st.sidebar.radio("投手分析メニュー", ["総合レポート", "1人集中分析", "2人比較"])
             
             header_name = "チーム全体" if p1 == "(全員)" else p1
-            st.header(f"📋 {header_name} 投手分析：{p_sub_mode}")
+            st.header(f"◎ {header_name} 投手分析：{p_sub_mode}")
 
             if p_sub_mode == "総合レポート":
                 c1, c2 = st.columns(2)
@@ -231,7 +231,7 @@ if check_password():
             target_col = st.sidebar.selectbox("コース別表示項目", ["打球速度", "打球角度", "飛距離"])
             angle_metric = st.sidebar.selectbox("角度グラフの指標", ["打率", "平均飛距離", "平均打球速度"])
             
-            st.title(f"□ {sel_b} 分析レポート")
+            st.title(f"◎ {sel_b} 分析レポート")
             if not target_df.empty:
                 col_m = {"打球速度": "ExitSpeed", "打球角度": "Angle", "飛距離": "Distance"}
                 unit_m = {"打球速度": "km/h", "打球角度": "°", "飛距離": "m"}
