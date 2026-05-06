@@ -72,20 +72,66 @@ if check_password():
         if df.empty: return
         total = len(df)
         df = df.copy()
+        
+        # 判定用フラグ
         df['is_strike'] = df['PitchCall'].isin(['StrikeCalled', 'StrikeSwinging', 'FoulBall', 'InPlayOut', 'Single', 'Double', 'Triple', 'HomeRun'])
         df['is_whiff'] = df['PitchCall'] == 'StrikeSwinging'
         df['is_swing'] = df['PitchCall'].isin(['StrikeSwinging', 'FoulBall', 'InPlayOut', 'Single', 'Double', 'Triple', 'HomeRun'])
-        agg_map = {'RelSpeed': 'mean', 'SpinRate': 'mean', 'InducedVertBreak': 'mean', 'HorzBreak': 'mean'}
+        
+        # 基本統計量の集計（平均球速、最高球速、回転数、変化量、投球数）
+        agg_map = {
+            'RelSpeed': ['mean', 'max'],
+            'SpinRate': 'mean',
+            'InducedVertBreak': 'mean',
+            'HorzBreak': 'mean',
+            'Pitcher': 'count'
+        }
         actual_agg = {k: v for k, v in agg_map.items() if k in df.columns}
-        actual_agg['Pitcher'] = 'count'
-        res = df.groupby('TaggedPitchType', observed=True).agg(actual_agg).reset_index()
-        whiff_res = df.groupby('TaggedPitchType', observed=True).apply(lambda x: (x['is_whiff'].sum() / x['is_swing'].sum() * 100) if x['is_swing'].sum() > 0 else 0).reset_index(name='Whiff%')
-        strike_res = df.groupby('TaggedPitchType', observed=True).apply(lambda x: x['is_strike'].mean() * 100).reset_index(name='Strike%')
-        res = res.merge(whiff_res, on='TaggedPitchType').merge(strike_res, on='TaggedPitchType')
-        res['割合'] = res['Pitcher'].apply(lambda x: f"{x/total*100:.1f}% ({x})")
+        res = df.groupby('TaggedPitchType', observed=True).agg(actual_agg)
+        
+        # マルチインデックスの平坦化 (RelSpeed_mean 等)
+        res.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in res.columns.values]
+        res = res.reset_index()
+
+        # 空振り率(Whiff%)とストライク率(Strike%)の計算
+        # 各指標を球種ごとに合計してから割ることで、正しい比率を算出
+        stats_df = df.groupby('TaggedPitchType', observed=True).agg({
+            'is_whiff': 'sum',
+            'is_swing': 'sum',
+            'is_strike': 'sum'
+        }).reset_index()
+
+        stats_df['Whiff%'] = (stats_df['is_whiff'] / stats_df['is_swing'] * 100).fillna(0)
+        # ストライク率は全投球数で割る
+        pitch_counts = df.groupby('TaggedPitchType', observed=True).size()
+        stats_df['Strike%'] = (stats_df['is_strike'] / stats_df['TaggedPitchType'].map(pitch_counts) * 100).fillna(0)
+
+        # 結合
+        res = res.merge(stats_df[['TaggedPitchType', 'Whiff%', 'Strike%']], on='TaggedPitchType')
+        
+        # 割合列の作成
+        res['割合'] = res['Pitcher_count'].apply(lambda x: f"{x/total*100:.1f}% ({x})")
+        
+        # 球種リストの順序に並び替え
         res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
         res = res.sort_values('TaggedPitchType').dropna(subset=['TaggedPitchType'])
-        st.dataframe(res.rename(columns={'TaggedPitchType':'球種','RelSpeed':'平均(km/h)','SpinRate':'回転数','InducedVertBreak':'縦変化','HorzBreak':'横変化'}).style.format(precision=1), use_container_width=True, hide_index=True)
+        
+        # カラム名のリネーム
+        rename_dict = {
+            'TaggedPitchType': '球種',
+            'RelSpeed_mean': '平均(km/h)',
+            'RelSpeed_max': '最高(km/h)',
+            'SpinRate_mean': '回転数',
+            'InducedVertBreak_mean': '縦変化',
+            'HorzBreak_mean': '横変化'
+        }
+        final_df = res.rename(columns=rename_dict)
+        
+        # 最終的に表示するカラム（Pitcher項目は除外）
+        show_cols = ['球種', '平均(km/h)', '最高(km/h)', '回転数', '縦変化', '横変化', 'Whiff%', 'Strike%', '割合']
+        final_cols = [c for c in show_cols if c in final_df.columns]
+        
+        st.dataframe(final_df[final_cols].style.format(precision=1), use_container_width=True, hide_index=True)
 
     @st.cache_data
     def load_all_data(data_dir):
@@ -139,7 +185,6 @@ if check_password():
             
             p_throws = target_df['PitcherThrows'].mode()[0] if not target_df.empty and 'PitcherThrows' in target_df.columns else 'Right'
             
-            # --- 修正箇所：ラジオボタンの選択肢とif条件を一致させる ---
             p_sub_mode = st.sidebar.radio("投手分析メニュー", ["総合レポート", "集中分析", "2人比較"])
             
             header_name = "チーム全体" if p1 == "(全員)" else p1
