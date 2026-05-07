@@ -73,12 +73,17 @@ if check_password():
         total = len(df)
         df = df.copy()
         
-        # 判定用フラグ
-        df['is_strike'] = df['PitchCall'].isin(['StrikeCalled', 'StrikeSwinging', 'FoulBall', 'InPlayOut', 'Single', 'Double', 'Triple', 'HomeRun'])
-        df['is_whiff'] = df['PitchCall'] == 'StrikeSwinging'
-        df['is_swing'] = df['PitchCall'].isin(['StrikeSwinging', 'FoulBall', 'InPlayOut', 'Single', 'Double', 'Triple', 'HomeRun'])
+        # --- 判定フラグの定義 ---
+        # スイング項目（ご指定通り BallCalled, StrikeCalled, HitByPitch, BallinDirt を除外）
+        swing_calls = ['StrikeSwinging', 'InPlay', 'FoulBallFieldable', 'FoulBallNotFieldable']
+        # ストライク項目（見逃し＋スイングすべて）
+        strike_calls = ['StrikeCalled', 'StrikeSwinging', 'InPlay', 'FoulBallFieldable', 'FoulBallNotFieldable']
         
-        # 基本統計量の集計（平均球速、最高球速、回転数、変化量、投球数）
+        df['is_swing'] = df['PitchCall'].isin(swing_calls)
+        df['is_whiff'] = df['PitchCall'] == 'StrikeSwinging'
+        df['is_strike'] = df['PitchCall'].isin(strike_calls)
+        
+        # 基本統計量の集計
         agg_map = {
             'RelSpeed': ['mean', 'max'],
             'SpinRate': 'mean',
@@ -89,12 +94,10 @@ if check_password():
         actual_agg = {k: v for k, v in agg_map.items() if k in df.columns}
         res = df.groupby('TaggedPitchType', observed=True).agg(actual_agg)
         
-        # マルチインデックスの平坦化 (RelSpeed_mean 等)
         res.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in res.columns.values]
         res = res.reset_index()
 
         # 空振り率(Whiff%)とストライク率(Strike%)の計算
-        # 各指標を球種ごとに合計してから割ることで、正しい比率を算出
         stats_df = df.groupby('TaggedPitchType', observed=True).agg({
             'is_whiff': 'sum',
             'is_swing': 'sum',
@@ -102,21 +105,17 @@ if check_password():
         }).reset_index()
 
         stats_df['Whiff%'] = (stats_df['is_whiff'] / stats_df['is_swing'] * 100).fillna(0)
-        # ストライク率は全投球数で割る
         pitch_counts = df.groupby('TaggedPitchType', observed=True).size()
         stats_df['Strike%'] = (stats_df['is_strike'] / stats_df['TaggedPitchType'].map(pitch_counts) * 100).fillna(0)
 
-        # 結合
+        # データの結合
         res = res.merge(stats_df[['TaggedPitchType', 'Whiff%', 'Strike%']], on='TaggedPitchType')
-        
-        # 割合列の作成
         res['割合'] = res['Pitcher_count'].apply(lambda x: f"{x/total*100:.1f}% ({x})")
         
-        # 球種リストの順序に並び替え
+        # 表示順とリネーム
         res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
         res = res.sort_values('TaggedPitchType').dropna(subset=['TaggedPitchType'])
         
-        # カラム名のリネーム
         rename_dict = {
             'TaggedPitchType': '球種',
             'RelSpeed_mean': '平均(km/h)',
@@ -127,7 +126,7 @@ if check_password():
         }
         final_df = res.rename(columns=rename_dict)
         
-        # 最終的に表示するカラム（Pitcher項目は除外）
+        # カラム選択（Pitcher列を排除）
         show_cols = ['球種', '平均(km/h)', '最高(km/h)', '回転数', '縦変化', '横変化', 'Whiff%', 'Strike%', '割合']
         final_cols = [c for c in show_cols if c in final_df.columns]
         
@@ -272,6 +271,7 @@ if check_password():
                         display_pitcher_table(d)
 
         elif mode == "打者分析":
+            # 打者分析セクション（以前と同様）
             st.sidebar.subheader("◯ 打者設定")
             b_col = 'Batter' if 'Batter' in full_df.columns else 'Batter Name'
             sel_b = st.sidebar.selectbox("打者を選択", sorted(full_df[b_col].dropna().unique().astype(str)))
