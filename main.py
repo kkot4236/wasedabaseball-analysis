@@ -73,17 +73,13 @@ if check_password():
         total = len(df)
         df = df.copy()
         
-        # --- 判定フラグの定義 ---
-        # スイング項目（ご指定通り BallCalled, StrikeCalled, HitByPitch, BallinDirt を除外）
         swing_calls = ['StrikeSwinging', 'InPlay', 'FoulBallFieldable', 'FoulBallNotFieldable']
-        # ストライク項目（見逃し＋スイングすべて）
         strike_calls = ['StrikeCalled', 'StrikeSwinging', 'InPlay', 'FoulBallFieldable', 'FoulBallNotFieldable']
         
         df['is_swing'] = df['PitchCall'].isin(swing_calls)
         df['is_whiff'] = df['PitchCall'] == 'StrikeSwinging'
         df['is_strike'] = df['PitchCall'].isin(strike_calls)
         
-        # 基本統計量の集計
         agg_map = {
             'RelSpeed': ['mean', 'max'],
             'SpinRate': 'mean',
@@ -97,7 +93,6 @@ if check_password():
         res.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in res.columns.values]
         res = res.reset_index()
 
-        # 空振り率(Whiff%)とストライク率(Strike%)の計算
         stats_df = df.groupby('TaggedPitchType', observed=True).agg({
             'is_whiff': 'sum',
             'is_swing': 'sum',
@@ -108,11 +103,9 @@ if check_password():
         pitch_counts = df.groupby('TaggedPitchType', observed=True).size()
         stats_df['Strike%'] = (stats_df['is_strike'] / stats_df['TaggedPitchType'].map(pitch_counts) * 100).fillna(0)
 
-        # データの結合
         res = res.merge(stats_df[['TaggedPitchType', 'Whiff%', 'Strike%']], on='TaggedPitchType')
         res['割合'] = res['Pitcher_count'].apply(lambda x: f"{x/total*100:.1f}% ({x})")
         
-        # 表示順とリネーム
         res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
         res = res.sort_values('TaggedPitchType').dropna(subset=['TaggedPitchType'])
         
@@ -126,11 +119,93 @@ if check_password():
         }
         final_df = res.rename(columns=rename_dict)
         
-        # カラム選択（Pitcher列を排除）
         show_cols = ['球種', '平均(km/h)', '最高(km/h)', '回転数', '縦変化', '横変化', 'Whiff%', 'Strike%', '割合']
         final_cols = [c for c in show_cols if c in final_df.columns]
         
         st.dataframe(final_df[final_cols].style.format(precision=1), use_container_width=True, hide_index=True)
+
+    # 新機能：リスク管理（打球結果）グラフ描画用関数
+    def render_risk_management_section(f_data, key_suffix=None):
+        st.divider()
+        st.write("#### ● リスク管理 (打球結果)")
+        
+        def classify_result(row):
+            res = str(row.get('PlayResult','')).lower()
+            call = str(row.get('PitchCall','')).lower()
+            hit = str(row.get('TaggedHitType','')).lower()
+            if 'home' in res: return '本塁打'
+            if 'walk' in res or 'hitby' in res: return '四死球'
+            if 'strikeout' in res or 'strikeout' in call or 'popup' in hit or 'swinging' in call: 
+                return '完全アウト(内野フライ+三振)'
+            if 'ground' in hit: return 'ゴロ'
+            if 'fly' in hit or 'line' in hit: return '外野フライ・ライナー'
+            return None
+
+        f_risk = f_data.copy()
+        f_risk['ResultCategory'] = f_risk.apply(classify_result, axis=1)
+        f_risk = f_risk.dropna(subset=['ResultCategory'])
+        
+        cat_order = ['完全アウト(内野フライ+三振)', 'ゴロ', '外野フライ・ライナー', '四死球', '本塁打']
+        color_map_risk = {
+            '完全アウト(内野フライ+三振)': '#87CEEB', 'ゴロ': '#9ACD32', 
+            '外野フライ・ライナー': '#F0E68C', '四死球': '#FFB444', '本塁打': '#F08080'
+        }
+
+        if f_risk.empty: 
+            st.info("分析用の打球データがありません。")
+            return
+
+        c1, c2 = st.columns(2)
+
+        # 1. 左右別のデータ加工とグラフ作成
+        df_total = f_risk.copy()
+        df_total['対象'] = '全体合計'
+        df_right = f_risk[f_risk['BatterSide'] == 'Right'].copy()
+        df_right['対象'] = '対右打者'
+        df_left = f_risk[f_risk['BatterSide'] == 'Left'].copy()
+        df_left['対象'] = '対left打者' # グラフ描画順のため一旦小文字
+        df_left['対象'] = '対左打者'
+        
+        df_side = pd.concat([df_total, df_right, df_left], ignore_index=True)
+        df_side_counts = df_side.groupby(['対象', 'ResultCategory']).size().reset_index(name='count')
+        df_side_total = df_side.groupby('対象').size().reset_index(name='total')
+        df_side_plot = pd.merge(df_side_counts, df_side_total, on='対象')
+        df_side_plot['割合(%)'] = (df_side_plot['count'] / df_side_plot['total']) * 100
+
+        fig_left = px.bar(
+            df_side_plot, y='対象', x='割合(%)', color='ResultCategory', orientation='h',
+            category_orders={'対象': ['対左打者', '対右打者', '全体合計'], 'ResultCategory': cat_order},
+            color_discrete_map=color_map_risk, barmode='stack'
+        )
+        fig_left.update_layout(
+            title="<b>左右別</b>", yaxis_title='', xaxis_title='割合(%)', 
+            showlegend=False, height=350, margin=dict(l=10, r=10, t=40, b=40)
+        )
+        with c1:
+            st.plotly_chart(fig_left, use_container_width=True)
+
+        # 2. 球種別のデータ加工とグラフ作成
+        df_pitch_counts = f_risk.groupby(['TaggedPitchType', 'ResultCategory']).size().reset_index(name='count')
+        df_pitch_total = f_risk.groupby('TaggedPitchType').size().reset_index(name='total')
+        df_pitch_plot = pd.merge(df_pitch_counts, df_pitch_total, on='TaggedPitchType')
+        df_pitch_plot['割合(%)'] = (df_pitch_plot['count'] / df_pitch_plot['total']) * 100
+
+        # 球種をPITCH_LISTの逆順に並び替える（Plotlyの仕様上、下から描画されるため）
+        pitch_order_rev = PITCH_LIST[::-1]
+        
+        fig_right = px.bar(
+            df_pitch_plot, y='TaggedPitchType', x='割合(%)', color='ResultCategory', orientation='h',
+            category_orders={'TaggedPitchType': pitch_order_rev, 'ResultCategory': cat_order},
+            color_discrete_map=color_map_risk, barmode='stack'
+        )
+        fig_right.update_layout(
+            title="<b>球種別</b>", yaxis_title='球種', xaxis_title='割合(%)', height=350,
+            margin=dict(l=10, r=10, t=40, b=80),
+            legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="center", x=0.3, title=None)
+        )
+        with c2:
+            st.plotly_chart(fig_right, use_container_width=True)
+
 
     @st.cache_data
     def load_all_data(data_dir):
@@ -206,7 +281,8 @@ if check_password():
                 display_pitcher_table(target_df)
 
             elif p_sub_mode == "集中分析":
-                item = st.sidebar.radio("分析項目", ["変化量詳細", "到達位置", "3Dリリース", "リリース位置安定度", "球速・回転数", "球速vs変化量", "カウント別"])
+                # ラジオボタンの選択肢に「リスク管理(打球結果)」を追加
+                item = st.sidebar.radio("分析項目", ["変化量詳細", "到達位置", "3Dリリース", "リリース位置安定度", "球速・回転数", "球速vs変化量", "カウント別", "リスク管理(打球結果)"])
                 
                 if item == "変化量詳細":
                     fig, ax = plt.subplots(figsize=(6, 6))
@@ -254,6 +330,10 @@ if check_password():
                         count_data = target_df.groupby(['Count', 'TaggedPitchType'], observed=True).size().unstack(fill_value=0)
                         if not count_data.empty: st.bar_chart(count_data.div(count_data.sum(axis=1), axis=0) * 100)
                 
+                # 追加項目：リスク管理関数の呼び出し
+                elif item == "リスク管理(打球結果)":
+                    render_risk_management_section(target_df)
+                
                 display_pitcher_table(target_df)
 
             elif p_sub_mode == "2人比較":
@@ -271,7 +351,6 @@ if check_password():
                         display_pitcher_table(d)
 
         elif mode == "打者分析":
-            # 打者分析セクション（以前と同様）
             st.sidebar.subheader("◯ 打者設定")
             b_col = 'Batter' if 'Batter' in full_df.columns else 'Batter Name'
             sel_b = st.sidebar.selectbox("打者を選択", sorted(full_df[b_col].dropna().unique().astype(str)))
