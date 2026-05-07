@@ -72,29 +72,48 @@ if check_password():
         if df.empty: return
         total = len(df)
         df = df.copy()
+        
+        # 指標フラグ作成
         swing_calls = ['StrikeSwinging', 'InPlay', 'FoulBallFieldable', 'FoulBallNotFieldable']
         strike_calls = ['StrikeCalled', 'StrikeSwinging', 'InPlay', 'FoulBallFieldable', 'FoulBallNotFieldable']
         df['is_swing'] = df['PitchCall'].isin(swing_calls)
         df['is_whiff'] = df['PitchCall'] == 'StrikeSwinging'
         df['is_strike'] = df['PitchCall'].isin(strike_calls)
         
-        agg_map = {'RelSpeed': ['mean', 'max'], 'SpinRate': 'mean', 'InducedVertBreak': 'mean', 'HorzBreak': 'mean', 'Pitcher': 'count'}
+        # 集計
+        agg_map = {'RelSpeed': ['mean', 'max'], 'SpinRate': 'mean', 'InducedVertBreak': 'mean', 'HorzBreak': 'mean'}
         res = df.groupby('TaggedPitchType', observed=True).agg({k: v for k, v in agg_map.items() if k in df.columns})
         res.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in res.columns.values]
         res = res.reset_index()
 
-        stats_df = df.groupby('TaggedPitchType', observed=True).agg({'is_whiff': 'sum', 'is_swing': 'sum', 'is_strike': 'sum'}).reset_index()
-        stats_df['Whiff%'] = (stats_df['is_whiff'] / stats_df['is_swing'] * 100).fillna(0)
-        pitch_counts = df.groupby('TaggedPitchType', observed=True).size()
-        stats_df['Strike%'] = (stats_df['is_strike'] / stats_df['TaggedPitchType'].map(pitch_counts) * 100).fillna(0)
+        stats_df = df.groupby('TaggedPitchType', observed=True).agg({
+            'is_whiff': 'sum', 'is_swing': 'sum', 'is_strike': 'sum', 'Pitcher': 'count'
+        }).reset_index()
 
-        res = res.merge(stats_df[['TaggedPitchType', 'Whiff%', 'Strike%']], on='TaggedPitchType')
-        res['割合'] = res['Pitcher_count'].apply(lambda x: f"{x/total*100:.1f}% ({x})")
+        stats_df['Whiff%'] = (stats_df['is_whiff'] / stats_df['is_swing'] * 100).fillna(0)
+        stats_df['Strike%'] = (stats_df['is_strike'] / stats_df['Pitcher'] * 100).fillna(0)
+        stats_df['割合'] = stats_df['Pitcher'].apply(lambda x: f"{x/total*100:.1f}% ({x})")
+
+        # 結合と整形
+        res = res.merge(stats_df[['TaggedPitchType', 'Whiff%', 'Strike%', '割合']], on='TaggedPitchType')
         res['TaggedPitchType'] = pd.Categorical(res['TaggedPitchType'], categories=PITCH_LIST, ordered=True)
         res = res.sort_values('TaggedPitchType').dropna(subset=['TaggedPitchType'])
         
-        final_df = res.rename(columns={'TaggedPitchType': '球種', 'RelSpeed_mean': '平均(km/h)', 'RelSpeed_max': '最高(km/h)', 'SpinRate_mean': '回転数', 'InducedVertBreak_mean': '縦変化', 'HorzBreak_mean': '横変化'})
-        st.dataframe(final_df.style.format(precision=1), use_container_width=True, hide_index=True)
+        # 表示項目のリネームと選択
+        final_df = res.rename(columns={
+            'TaggedPitchType': '球種', 
+            'RelSpeed_mean': '平均(km/h)', 
+            'RelSpeed_max': '最高(km/h)', 
+            'SpinRate_mean': '回転数', 
+            'InducedVertBreak_mean': '縦変化', 
+            'HorzBreak_mean': '横変化'
+        })
+        
+        # Pitcher_countを含まない列のみを表示
+        show_cols = ['球種', '平均(km/h)', '最高(km/h)', '回転数', '縦変化', '横変化', 'Whiff%', 'Strike%', '割合']
+        actual_cols = [c for c in show_cols if c in final_df.columns]
+        
+        st.dataframe(final_df[actual_cols].style.format(precision=1), use_container_width=True, hide_index=True)
 
     def render_risk_management_plots(f_data):
         def classify_result(row):
@@ -114,7 +133,6 @@ if check_password():
         cat_order = ['完全アウト(内野フライ+三振)', 'ゴロ', '外野フライ・ライナー', '四死球', '本塁打']
         color_map = {'完全アウト(内野フライ+三振)': '#87CEEB', 'ゴロ': '#9ACD32', '外野フライ・ライナー': '#F0E68C', '四死球': '#FFB444', '本塁打': '#F08080'}
 
-        # 左右別
         st.write("##### 左右別")
         side_data = []
         for l, m in [('全体合計', [True]*len(f_risk)), ('対右', f_risk['BatterSide']=='Right'), ('対左', f_risk['BatterSide']=='Left')]:
@@ -128,7 +146,6 @@ if check_password():
             df_s['割合(%)'] = (df_s['count'] / df_s['total']) * 100
             st.plotly_chart(px.bar(df_s, y='対象', x='割合(%)', color='ResultCategory', orientation='h', category_orders={'対象':['対左','対右','全体合計'],'ResultCategory':cat_order}, color_discrete_map=color_map, barmode='stack', height=250).update_layout(showlegend=False, margin=dict(l=0,r=0,t=20,b=20)), use_container_width=True)
 
-        # 球種別
         st.write("##### 球種別")
         p_t = f_risk.groupby('TaggedPitchType').size().reset_index(name='total')
         p_c = f_risk.groupby(['TaggedPitchType', 'ResultCategory']).size().reset_index(name='count')
@@ -191,8 +208,8 @@ if check_password():
                     fig, ax = plt.subplots(figsize=(6,6))
                     for pt in PITCH_LIST:
                         d = t_df[t_df['TaggedPitchType']==pt]
-                        if not d.empty: ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6); ax.axvline(0); ax.axhline(0); ax.set_xlim(-6,6); ax.set_ylim(-6,6); ax.set_title("リリースアングル")
-                    st.pyplot(fig)
+                        if not d.empty: ax.scatter(d['HorzRelAngle'], d['VertRelAngle'], color=PITCH_COLORS.get(pt,'gray'), label=pt, alpha=0.6)
+                    ax.axvline(0); ax.axhline(0); ax.set_xlim(-6,6); ax.set_ylim(-6,6); ax.set_title("リリースアングル"); st.pyplot(fig)
                 display_pitcher_table(t_df)
 
             else:
