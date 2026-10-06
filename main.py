@@ -27,17 +27,17 @@ if check_password():
     st.set_page_config(layout="wide", page_title="Trackman Database")
 
     # --- 2. 共通設定・関数 ---
-    PITCH_LIST = ['Fastball', 'Slider', 'Cutter', 'Curveball', 'Splitter', 'ChangeUp', 'Sinker', 'TwoSeamFastBall']
+    PITCH_LIST = ['Fastball', 'Slider', 'Cutter', 'Curveball', 'Splitter', 'ChangeUp', 'Sinker', 'TwoSeamFastBall','OneSeamFastBall']
     PITCH_COLORS = {
         'Fastball': '#FF4B4B', 'Slider': '#1E90FF', 'Cutter': '#FF1493', 
         'Curveball': '#32CD32', 'Splitter': '#40E0D0', 'ChangeUp': '#8A2BE2', 
-        'Sinker': '#FFA500', 'TwoSeamFastBall': '#FF8C00'
+        'Sinker': '#FFA500', 'TwoSeamFastBall': '#FF8C00', 'OneSeamFastBall': '	#a9a9a9'
     }
 
     def get_marker(pitch_type, throws):
         if pitch_type == 'Fastball': return 'o'
         if pitch_type in ['Slider', 'Cutter']: return '<' if throws == 'Right' else '>'
-        if pitch_type == 'Splitter': return 's'
+        if pitch_type in ['Splitter', 'OneSeamFastBall']: return 's'
         if pitch_type in ['ChangeUp', 'Sinker']: return 'v'
         if pitch_type == 'Curveball': return '^'
         return 'o'
